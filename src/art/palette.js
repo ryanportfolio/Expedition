@@ -70,9 +70,9 @@ export const RAMPS = Object.freeze([
   shifting('creature-accent',
     ['#3f1000', '#5d290a', '#80410b', '#a35c07', '#c07d21', '#d1a35b', '#dfc89b', '#f6ebc9'],
     ['#260002', '#4b0002', '#731202', '#972701', '#ba4106', '#d86105', '#e09457', '#e6bc8b']),
-  // Divine hand. Good: spectral blue-white (12). Evil: crimson through ember to pale ash (no pink or magenta).
+  // Divine hand. Good: translucent icy cyan, deep sea-blue darks to a blue-white core (12). Evil: crimson through ember to pale ash (no pink or magenta).
   shifting('hand-glow',
-    ['#1d2d66', '#264888', '#2465b1', '#2684d1', '#48a5e1', '#7ec3e7', '#b3dfef', '#e5faff'],
+    ['#0b1f3a', '#103d60', '#175e86', '#257fa8', '#45a2c6', '#72c3de', '#a9e2f0', '#e4fbff'],
     ['#390109', '#620312', '#8d0a17', '#b12e20', '#c9583f', '#a69b92', '#c5b8af', '#ddd8d2']),
   // Crops. Good: ripe wheat (01 fields), a touch more golden than thatch. Evil: blighted, dried stalks (06 bottom field).
   shifting('grain',
@@ -95,6 +95,11 @@ export const RAMPS = Object.freeze([
   shifting('plaster',
     ['#2f3034', '#504743', '#6c6159', '#857a6d', '#a39785', '#bdb29d', '#dad1bd', '#f4eedd'],
     ['#161518', '#2e2624', '#433a33', '#584e46', '#6e6459', '#847b6f', '#9a9287', '#b1aaa0']),
+  // Appended (round 41). The hand's stroke hearts and warm trail (12). Good: muted rose pink, not neon.
+  // Evil: dried-blood rose to dusty ash pink.
+  shifting('heart',
+    ['#2a0a14', '#46162a', '#65233b', '#86344c', '#a64b5e', '#c06a76', '#d6909a', '#ebbcc0'],
+    ['#1a0507', '#2e0d10', '#451619', '#5e2224', '#763331', '#8a4943', '#9c645c', '#b08680']),
 ]);
 
 export const SHADES = 8;

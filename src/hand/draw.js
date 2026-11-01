@@ -3,10 +3,27 @@
 // here holds art. Runs in draw(ctx) only, never on sim ticks.
 import { getSprite } from '../art/registry.js';
 import { idx } from '../art/palette.js';
+import { makeLut } from '../art/lut.js';
 
 const SHADOWS = ['shadow-s', 'shadow-m', 'shadow-l'];
 const RING = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 const flatLuts = new Map();
+const STEP_LUTS = Array.from({ length: 17 }, (_, i) => makeLut((i - 8) / 8)); // alignment -1..1 in steps of 1/8
+
+/**
+ * LUT the hand is drawn with, given the world's LUT. The palette blends every ramp linearly from evil
+ * to good, so at alignment 0 the hand would be half icy cyan, half crimson: a grey-violet that reads as
+ * neither. The god's hand keeps its icy good look until the player actually leans evil, then turns
+ * twice as fast: every step from 0 up draws the full good look, a step s below 0 draws step 8 + 2s,
+ * so the hand is the half blend at alignment -0.5 and full crimson-ash at -1. Any LUT that is not one
+ * of the alignment LUTs (test LUTs, a LUT someone else set) is used as it is.
+ */
+export function handLut(lut) {
+  const i = STEP_LUTS.indexOf(lut);
+  if (i < 0) return lut;
+  const s = i - 8;
+  return STEP_LUTS[(s >= 0 ? 8 : Math.max(-8, 8 + 2 * s)) + 8];
+}
 
 /**
  * Blit that skips indices whose LUT color is fully transparent. renderer.lut starts all zero until the
@@ -77,5 +94,5 @@ export function drawTop(ctx, hand, held) {
     blitOpaque(ctx, held.sprite, v.vx, v.vy, held.lut ?? ctx.lut, !!held.flipX);
   }
   const v = ctx.toView(hand.x, hand.y, hand.z);
-  blitOpaque(ctx, getSprite(hand.pose), v.vx, v.vy, ctx.lut);
+  blitOpaque(ctx, getSprite(hand.pose), v.vx, v.vy, handLut(ctx.lut));
 }
