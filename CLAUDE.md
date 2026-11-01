@@ -2,11 +2,17 @@
 
 > Kernel rules. Read first. Cross-cutting only. Topical detail lives in `.claude/reference/`.
 
-<!-- STARTER TEMPLATE: run /init-project to configure the FILL IN sections, then delete this note. -->
-
 ## What this project is
 
-<!-- FILL IN (via /init-project): two or three sentences — what this is and who it serves; a short "won't compromise on" list; optional glossary of terms the team uses. Cap ~10 lines: this file loads every turn, and direction earns its weight only while it stays short. A model that knows what the product refuses to compromise on tests for it without being told. -->
+Expedition is an original god game for the browser, set on one isometric pixel-art island. The player's divine hand carries villagers, trees and rocks, casts miracles paid for with worship, trains a stone creature with strokes and slaps, and wins by converting the rival village. Plain JavaScript ES modules on Vite, shipped as a static build; `pixelfx` is the only runtime dependency.
+
+Won't compromise on:
+
+- Original work: no names, art or text from another company's game. `npm run check:ip` stays clean.
+- Art drawn in code as palette-index sprites, recoloured by a LUT for the good and evil alignments; sound synthesized with WebAudio. No image or audio files.
+- Pixel-exact output: every game pixel lands on screen as one solid block of scale x scale device pixels (the browser checks test it).
+- Deterministic sim: seeded RNG and a fixed 1/30 s tick, so a scenario with the same seed replays the same way.
+- Frame budget: p95 frame time at or under 16.7 ms in the worst-case scene (`node scripts/perf-check.mjs`).
 
 ## Default prose mode: caveman ultra
 
@@ -20,10 +26,11 @@ Caveman covers chat replies and files that only agents read: skill bodies and th
 
 ## CRITICAL: Verification
 
-<!-- FILL IN (via /init-project): what can this sandbox verify? Installs/builds/type-checks meaningful? Can the user reach a dev server you start? What is the AUTHORITATIVE signal (CI, deploy log, local tests)? -->
+This machine (Windows desktop with a GPU) can run every check. Commands and flags: `.claude/reference/commands.md`.
 
-Defaults until configured:
-
+- Authoritative signals: `npm run check` for game logic and art data (node only); `npm run check:browser` for anything drawn or interactive, plus looking at its screenshots in `D:/screenshots/Expedition/`; `node scripts/perf-check.mjs` for frame time; `npm run check:ip` for names.
+- CI (GitHub Actions, Linux) runs only `npm run build`, `npm run check` and `npm run check:ip`. A green CI says nothing about rendering, input or performance; those need the local browser and perf checks.
+- The user can open a dev server you start here (`npm run dev`, localhost). `?scenario=<name>&seed=<n>` runs one scenario by hand.
 - Inspect logs / run scripts / read code yourself before claiming anything works.
 - Never claim visual/UI verification you didn't actually perform.
 - Can't run the authoritative check → flag the risk plainly, don't claim it passes.
@@ -79,9 +86,10 @@ Nothing merges until the PR has been through `/codex-review` and its surviving f
 
 ## Environment & deploy target
 
-<!-- FILL IN (via /init-project): where the app runs (host, DB, secrets); install policy (can sessions run npm/pip for app-runtime deps?); migration policy; anything that ALWAYS requires user action. -->
-
-Defaults until configured: ask before installing app-runtime dependencies; provide migrations as copy/paste-ready artifacts rather than running them blind.
+- Static browser game: no server code, database, secrets or environment variables, so no migrations. `npm run build` writes `dist/` with relative paths (`.claude/reference/deployment.md`).
+- Deploy target not chosen. Never deploy, create a hosting project or connect a domain without a separate user OK.
+- No new dependency, runtime or dev, without a user decision. `pixelfx` stays pinned to its commit; Playwright packages follow the latest release through Dependabot.
+- In a worktree whose `node_modules` links to the main checkout, never run `npm ci` or `npm install`: it writes into the shared install.
 
 ## Project reference library
 
