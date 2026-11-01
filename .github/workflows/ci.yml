@@ -29,7 +29,8 @@ jobs:
       - run: npm run check
       - run: npm run check:ip
 
-  # Separate job: dependabot-playwright-automerge.yml waits on the check named "ci" above.
+  # Separate job: dependabot-playwright-automerge.yml requires the check named "ci" above by name
+  # (and waits on every other check, this one included).
   firmware:
     name: firmware
     runs-on: ubuntu-latest
@@ -43,5 +44,5 @@ jobs:
         with:
           node-version: 24
 
-      - name: Codex skills registered and in sync with their Claude source
+      - name: Codex skills sync check (drift warns, broken input fails)
         run: node .claude/scripts/sync-codex-skills.mjs --check

@@ -8,8 +8,8 @@ Expedition is an original god game for the browser, set on one isometric pixel-a
 
 Won't compromise on:
 
-- Original work: no names, art or text from another company's game. `npm run check:ip` stays clean.
-- Art drawn in code as palette-index sprites, recoloured by a LUT for the good and evil alignments; sound synthesized with WebAudio. No image or audio files.
+- Original work: no names, art or text from another company's game. `npm run check:ip` gates the names and stays clean.
+- Sprites are palette-index data, recoloured by a LUT that blends along the good-evil alignment. Most are drawn in code; the hand is baked offline from source PNGs in `art-src/hand/` by `scripts/bake-hand.mjs`. Sound is synthesized with WebAudio. The game loads no image or audio files at run time.
 - Pixel-exact output: every game pixel lands on screen as one solid block of scale x scale device pixels (the browser checks test it).
 - Deterministic sim: seeded RNG and a fixed 1/30 s tick, so a scenario with the same seed replays the same way.
 - Frame budget: p95 frame time at or under 16.7 ms in the worst-case scene (`node scripts/perf-check.mjs`).
@@ -26,15 +26,15 @@ Caveman covers chat replies and files that only agents read: skill bodies and th
 
 ## CRITICAL: Verification
 
-This machine (Windows desktop with a GPU) can run every check. Commands and flags: `.claude/reference/commands.md`.
+This machine (Windows desktop with a GPU) can run every check once `node_modules` is installed. Commands and flags: `.claude/reference/commands.md`.
 
-- Authoritative signals: `npm run check` for game logic and art data (node only); `npm run check:browser` for anything drawn or interactive, plus looking at its screenshots in `D:/screenshots/Expedition/`; `node scripts/perf-check.mjs` for frame time; `npm run check:ip` for names.
-- CI (GitHub Actions, Linux) runs only `npm run build`, `npm run check` and `npm run check:ip`. A green CI says nothing about rendering, input or performance; those need the local browser and perf checks.
+- Authoritative signals: `npm run check` for game logic, art data and names (node only; it includes `check-ip.mjs`); `npm run check:browser` for anything drawn or interactive, plus looking at its screenshots in `D:/screenshots/Expedition/<worktree folder>/<scenario>/` (or the `.tmp/screenshots/` fallback the check prints); `node scripts/perf-check.mjs` for frame time.
+- CI (GitHub Actions, Linux): job `ci` runs `npm run build`, `npm run check` and `npm run check:ip`; job `firmware` runs the Codex skills sync check. Neither renders anything, so a green CI says nothing about rendering, input or performance; those need the local browser and perf checks.
 - The user can open a dev server you start here (`npm run dev`, localhost). `?scenario=<name>&seed=<n>` runs one scenario by hand.
 - Inspect logs / run scripts / read code yourself before claiming anything works.
 - Never claim visual/UI verification you didn't actually perform.
 - Can't run the authoritative check → flag the risk plainly, don't claim it passes.
-- Visual/UI checks: headed Chrome on the real GPU, launched through `launchPlacedChrome()` (`scripts/lib/launch-chrome.mjs`). Never headless (WebGL falls back to the CPU), never minimized (rAF drops to 1 fps). Pass this rule into every subagent prompt that does browser work.
+- Visual/UI checks: headed Chrome on the real GPU, launched through `launchPlacedChrome()` (`scripts/lib/launch-chrome.mjs`). Never headless (no real GPU, so frame timing and compositing differ), never minimized (rAF drops to 1 fps). Pass this rule into every subagent prompt that does browser work.
 - Any number of subagents can run browsers in parallel: each launches its own Chrome through `launchPlacedChrome()` (needs `playwright` or `playwright-core` installed). The `mcp__playwright-iso__*` tools are one browser per session, shared by the main session and all its subagents (`--isolated` only keeps the profile in memory): use them from the main session or one subagent at a time. Never the shared playwright plugin or the app's Browser pane, which hold one browser and deadlock a second user.
 
 ## Core principles
@@ -86,10 +86,10 @@ Nothing merges until the PR has been through `/codex-review` and its surviving f
 
 ## Environment & deploy target
 
-- Static browser game: no server code, database, secrets or environment variables, so no migrations. `npm run build` writes `dist/` with relative paths (`.claude/reference/deployment.md`).
-- Deploy target not chosen. Never deploy, create a hosting project or connect a domain without a separate user OK.
+- Static browser game: no server code, database or secrets, and the game reads no environment variables, so no migrations. `npm run build` writes `dist/` with relative paths (`.claude/reference/deployment.md`).
+- Deploy target not chosen. Never deploy, create a hosting project, link the repo to a host or connect a domain unless the user asks for it in this session, even though the Vercel and Railway CLIs are logged in.
 - No new dependency, runtime or dev, without a user decision. `pixelfx` stays pinned to its commit; Playwright packages follow the latest release through Dependabot.
-- In a worktree whose `node_modules` links to the main checkout, never run `npm ci` or `npm install`: it writes into the shared install.
+- In a worktree whose `node_modules` is a link (junction) to another checkout's install, never run `npm ci` or `npm install`: it writes into the shared install.
 
 ## Project reference library
 
