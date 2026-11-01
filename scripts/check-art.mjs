@@ -1,7 +1,9 @@
-// Node checks for the art kit: palette, LUTs, sprite primitives, registry, PNG encoder.
+// Node checks for the art kit: palette, LUTs, sprite primitives, registry, PNG encoder and decoder,
+// and that the baked hand sprites (src/art/painters/hand-data.js) match a fresh bake of art-src/hand/.
 //   node scripts/check-art.mjs        exit 0 on pass; non-zero with the failing assertions printed.
 
 import { inflateSync } from 'node:zlib';
+import { spawnSync } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -12,7 +14,7 @@ const { RAMPS, RAMP, SHADES, MAX_RAMPS, idx, rampOf } = await load('src/art/pale
 const { makeLut, lutFor, rgbaOf, packRGBA } = await load('src/art/lut.js');
 const S = await load('src/art/sprite.js');
 const registry = await load('src/art/registry.js');
-const { encodePNG, crc32 } = await import('./lib/png.mjs');
+const { encodePNG, decodePNG, crc32 } = await import('./lib/png.mjs');
 
 let failed = 0, passed = 0;
 function check(name, cond, detail = '') {
@@ -27,8 +29,8 @@ const hexRGB = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 
 // ---- palette ----
 const REQUIRED = ['ink', 'grass', 'dirt', 'sand', 'rock', 'water', 'foliage', 'bark', 'thatch', 'stone', 'clay', 'skin',
   'cloth-player', 'cloth-rival', 'creature-hide', 'creature-accent', 'hand-glow', 'grain', 'fire', 'heal', 'lightning',
-  'ui-parchment', 'ui-ink', 'shadow'];
-const MUST_SHIFT = ['grass', 'dirt', 'sand', 'rock', 'water', 'foliage', 'bark', 'thatch', 'stone', 'creature-hide', 'creature-accent', 'hand-glow'];
+  'ui-parchment', 'ui-ink', 'shadow', 'heart'];
+const MUST_SHIFT = ['grass', 'dirt', 'sand', 'rock', 'water', 'foliage', 'bark', 'thatch', 'stone', 'creature-hide', 'creature-accent', 'hand-glow', 'heart'];
 const MUST_NOT_SHIFT = ['ink', 'skin', 'ui-parchment', 'ui-ink'];
 check('ramp count 1..31', RAMPS.length >= 1 && RAMPS.length <= 31 && MAX_RAMPS === 31, `have ${RAMPS.length}`);
 eq('8 shades', SHADES, 8);
@@ -338,6 +340,24 @@ check('neutral ramps identical across all 17 alignments', neutralSame);
     && JSON.stringify(pix(1, 1)) === JSON.stringify([160, 135, 28, 0]));
   eq('CRC32 known value', crc32(Buffer.from('IEND', 'latin1')), 0xae426082);
   check('encodePNG rejects wrong length', (() => { try { encodePNG(2, 2, new Uint8Array(3)); return false; } catch { return true; } })());
+  // decoder (scripts/bake-hand.mjs reads its sources with it): every encoder mode decodes back to the input
+  const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+  const dec = decodePNG(png);
+  check('decodePNG RGBA round trip', dec.width === w && dec.height === h && same(dec.rgba, rgba));
+  const big = new Uint8ClampedArray(7 * 5 * 4);
+  for (let i = 0; i < 35; i++) big.set([(i * 37) & 255, (i * 91 + 13) & 255, (255 - i * 11) & 255, 255], i * 4);
+  for (const opts of [{ filter: true }, { rgb: true }, { rgb: true, filter: true }]) {
+    const d = decodePNG(encodePNG(7, 5, big, opts));
+    check(`decodePNG round trip ${JSON.stringify(opts)}`, d.width === 7 && d.height === 5 && same(d.rgba, big));
+  }
+  check('decodePNG rejects a bad CRC', (() => { const b = Buffer.from(png); b[b.length - 20] ^= 1; try { decodePNG(b); return false; } catch { return true; } })());
+  check('decodePNG rejects non-PNG bytes', (() => { try { decodePNG(Buffer.from('not a png')); return false; } catch { return true; } })());
+}
+
+// ---- baked hand sprites are current ----
+{
+  const r = spawnSync(process.execPath, [join(ROOT, 'scripts/bake-hand.mjs'), '--check'], { cwd: ROOT, encoding: 'utf8' });
+  check('hand-data.js matches a fresh bake (node scripts/bake-hand.mjs --check)', r.status === 0, `exit ${r.status}: ${(r.stderr || r.error?.message || '').trim()}`);
 }
 
 if (failed) {
