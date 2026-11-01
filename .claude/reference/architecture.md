@@ -4,6 +4,16 @@
 
 Engine doc: `docs/architecture.md`; quoted names below are its section headings. Commands: `commands.md`. No auth: static browser game.
 
+```mermaid
+flowchart LR
+  html[index.html] --> main[src/main.js] --> game[createGame in src/game.js]
+  game --> tick[fixed 1/30 s tick] --> systems["systems in SYSTEM_ORDER: terrain, village, creature, hand, miracles, alignment, ui, audio"]
+  game --> frame[frame] --> renderer[src/render/renderer.js] --> canvas[canvas]
+  systems -. "draw(ctx)" .-> renderer
+  pngs["art-src/hand/*.png"] --> bake[scripts/bake-hand.mjs] --> data[src/art/painters/hand-data.js]
+  data --> painter[src/art/painters/hand.js] --> registry[src/art/registry.js] --> renderer
+```
+
 ## System flow (doc: "The game object", "Systems", "Game systems")
 - Entry chain: `index.html` → `src/main.js` → `createGame` in `src/game.js`.
 - System order: `SYSTEM_ORDER` in `src/game.js`.
