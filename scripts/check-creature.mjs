@@ -1,0 +1,351 @@
+// Creature system check: node only, no browser. On the island with the village set up, runs the
+// shared creature trial (src/creature/trial.js): spawn, two sim minutes of free choice, forced
+// actions and their world effects (eat grain, water + stroke, poop, smash, haul, throw rock), a slap
+// right after eating a villager followed by three starving minutes (never eats a villager again,
+// goes weak, slower, no throws) and recovery on grain, then a tether. Every tick it checks the
+// creature never stands in water or crosses more than 2 height in a step and never dies. Then:
+// act events carry actor creature and the brain's moral weights, the same seed gives the same run.
+// Extra cases: a cliff map (a 3-high cliff and a 2-then-1 ramp: it takes the ramp, never steps more
+// than 2, never into water), the movement sampler catching a planted cliff jump and water tile, a
+// tether next to the sea stops on the shore, a tether for another creature id is ignored, hp 0 is
+// restored and a removed creature comes back. Untrained defaults on seeds 13, 21, 4 (harm limits,
+// grain over villagers, temples stand) and training on the same seeds (slapped twice: no harmful act
+// again at hunger 1; stroked: eat:villager often). Runtime traps: Math.random and the browser globals
+// (document, window, requestAnimationFrame, localStorage, HTMLCanvasElement, Image) are counted from
+// before the game modules load through the seed 1 trial; both counts must stay 0, and a planted
+// access shows the traps count. The creature sources are also scanned for Math.random and DOM names.
+// Exits 1 and prints each failing check.
+//
+//   node scripts/check-creature.mjs
+import { readFileSync, readdirSync } from 'node:fs';
+
+// ---- runtime traps, installed before any game module loads
+const TRAPPED = ['document', 'window', 'requestAnimationFrame', 'localStorage', 'HTMLCanvasElement', 'Image'];
+const touched = [];
+let randomCalls = 0;
+const savedGlobals = new Map(TRAPPED.map((n) => [n, Object.getOwnPropertyDescriptor(globalThis, n)]));
+const realRandom = Math.random;
+function setTraps(on) {
+  if (on) {
+    for (const n of TRAPPED) Object.defineProperty(globalThis, n, { configurable: true, get() { touched.push(n); return undefined; } });
+    Math.random = () => { randomCalls++; return realRandom(); };
+  } else {
+    for (const n of TRAPPED) { const d = savedGlobals.get(n); if (d) Object.defineProperty(globalThis, n, d); else delete globalThis[n]; }
+    Math.random = realRandom;
+  }
+}
+setTraps(true);
+void globalThis.document; void globalThis.window; Math.random(); // planted: must count 2 and 1
+const trapsCount = touched.length === 2 && randomCalls === 1;
+touched.length = 0; randomCalls = 0;
+const { createGame } = await import('../src/game.js');
+const { buildIsland } = await import('../src/world/island.js');
+const { creatureTrial, moveSampler } = await import('../src/creature/trial.js');
+const { CREATURE } = await import('../src/creature/tunables.js');
+const importTouched = [...touched], importRandom = randomCalls;
+touched.length = 0; randomCalls = 0;
+
+const fails = [];
+let passes = 0;
+function check(cond, msg) {
+  if (cond) { passes++; console.log(`PASS ${msg}`); } else { fails.push(msg); console.log(`FAIL ${msg}`); }
+  return !!cond;
+}
+
+// The art registry warns once per unknown sprite name; painters are not registered in node.
+const warn = console.warn;
+console.warn = (...a) => { if (!String(a[0]).startsWith('art registry:')) warn(...a); };
+
+function newGame(seed) {
+  const game = createGame({ seed });
+  game.world.loadMap(buildIsland());
+  game.systems.village.setup();
+  game.systems.creature.setup();
+  return game;
+}
+
+async function run(seed, label, { quiet = false } = {}) {
+  const game = newGame(seed);
+  const h = {
+    step: (sec) => game.clock.run(Math.max(1, Math.round(sec / game.clock.step)), game.tick),
+    assert: (cond, msg) => (quiet ? (cond ? passes++ : check(false, `${label}: ${msg}`)) : check(cond, `${label}: ${msg}`)),
+    log: (...a) => { if (!quiet) console.log(`  ${label}:`, ...a); },
+  };
+  return { game, out: await creatureTrial(game, h) };
+}
+
+// ---- inert until setup
+{
+  const game = createGame({ seed: 1 });
+  game.world.loadMap(buildIsland());
+  game.systems.village.setup();
+  game.clock.run(30, game.tick);
+  check(game.world.query({ kind: 'creature' }).length === 0, 'inert until creature.setup(): no creature spawned by loading the map');
+  game.systems.creature.setup();
+  game.systems.creature.setup();
+  game.clock.run(1, game.tick);
+  check(game.world.query({ kind: 'creature' }).length === 1, 'setup() spawns exactly one creature, twice called');
+  const api = game.systems.creature;
+  check(api.entity && api.brain && typeof api.state === 'function' && api.state().id === api.entity.id, 'game.systems.creature exposes entity, brain and state()');
+  game.world.loadMap(buildIsland());
+  game.clock.run(1, game.tick);
+  check(api.entity === null && game.world.query({ kind: 'creature' }).length === 0, 'a new map clears the creature until setup() again');
+}
+
+// ---- main trial, seed 1, still under the runtime traps
+let a = null;
+try {
+  a = await run(1, 'seed 1');
+} catch (err) {
+  check(false, `seed 1 trial threw: ${err.stack || err}`);
+}
+setTraps(false);
+check(trapsCount, 'runtime traps count a planted document/window access and a planted Math.random call');
+check(importTouched.length === 0 && importRandom === 0, `loading the game modules reads no browser globals and calls no Math.random (${[...new Set(importTouched)].join(', ') || 'none'}, ${importRandom} random)`);
+check(touched.length === 0, `setup, update and event handlers through the seed 1 trial read no browser globals (${[...new Set(touched)].join(', ') || 'none'})`);
+check(randomCalls === 0, `no Math.random calls through the seed 1 trial (${randomCalls})`);
+
+// ---- same seed again: identical run
+if (a) {
+  const b = await run(1, 'seed 1 again', { quiet: true });
+  const same = a.out.trace.length === b.out.trace.length && a.out.trace.every((v, i) => v === b.out.trace[i]) &&
+    JSON.stringify(a.out.summary) === JSON.stringify(b.out.summary);
+  check(same, `deterministic: seed 1 twice gives the same path (${a.out.trace.length / 2} ticks) and the same learned table`);
+}
+
+// ---- another seed, behaviours only
+try {
+  await run(7, 'seed 7', { quiet: true });
+  check(true, 'seed 7: the same trial passes (failures above, if any)');
+} catch (err) {
+  check(false, `seed 7 trial threw: ${err.stack || err}`);
+}
+
+// ---- untrained defaults (tunables harm / harmCooldown): free play costs the player village little
+const STEP = 1 / 30;
+const keyOf = (a) => `${a.verb}:${a.target}`;
+const HARM = Object.keys(CREATURE.harm);
+/** As the game boots: the terrain system loads the island itself, then village and creature setup. */
+function bootGame(seed) {
+  const game = createGame({ seed });
+  game.systems.village.setup();
+  game.systems.creature.setup();
+  return game;
+}
+for (const seed of [13, 21, 4]) {
+  const game = bootGame(seed);
+  const { world, events } = game;
+  const harmAt = { villager: [], building: [] };
+  let deaths = 0, templeLow = Infinity, templeWrecked = 0;
+  events.on('act', (a) => { const v = CREATURE.harm[keyOf(a)]; if (a.actor === 'creature' && v) harmAt[v].push(game.systems.creature.time); });
+  events.on('villager-died', (p) => { if (world.get(p.id)?.owner === 'player') deaths++; });
+  events.on('building-destroyed', (p) => { if (world.get(p.buildingId)?.type === 'temple') templeWrecked++; });
+  const temples = world.query({ kind: 'building' }).filter((b) => b.type === 'temple');
+  for (let i = 0; i < 300 * 30; i++) {
+    game.tick(STEP);
+    for (const t of temples) templeLow = Math.min(templeLow, t.hp);
+  }
+  const gaps = Object.entries(harmAt).map(([v, ts]) => [v, Math.min(Infinity, ...ts.slice(1).map((t, i) => t - ts[i]))]);
+  check(deaths <= 2, `seed ${seed} untrained, 5 sim minutes: the player village loses ${deaths} villagers (at most 2)`);
+  check(temples.length === 2 && templeLow > 0 && templeWrecked === 0 && temples.every((t) => world.get(t.id) === t && t.stage !== 'wrecked'),
+    `seed ${seed} untrained: both temples stand (lowest hp ${templeLow.toFixed(2)}, ${templeWrecked} wrecked)`);
+  check(gaps.every(([v, g]) => g >= CREATURE.harmCooldown[v] - 1e-6),
+    `seed ${seed} untrained: harmful acts per victim kind at least a cooldown apart (${gaps.map(([v, g]) => `${v} ${harmAt[v].length} acts, min gap ${Number.isFinite(g) ? g.toFixed(1) : '-'} s`).join('; ')})`);
+}
+
+// ---- untrained and starving: grain beats villagers while grain is on offer; a control without
+// grain shows villagers were within reach
+for (const withGrain of [true, false]) {
+  const game = bootGame(13);
+  const { world, events } = game;
+  const cs = game.systems.creature;
+  const n = { 'eat:villager': 0, 'eat:grain': 0 };
+  events.on('act', (a) => { if (a.actor === 'creature' && keyOf(a) in n) n[keyOf(a)]++; });
+  const stock = () => {
+    for (const b of world.query({ kind: 'building' })) {
+      if (b.type === 'storehouse') b.grain = withGrain ? Math.max(b.grain, 30) : 0;
+      if (b.type === 'field') b.growth = Math.min(b.growth, 0.5);
+    }
+  };
+  cs.debug.holdHunger = 1;
+  for (let i = 0; i < 120 * 30; i++) { if (i % 30 === 0) stock(); game.tick(STEP); }
+  cs.debug.holdHunger = null;
+  if (withGrain) check(n['eat:villager'] === 0 && n['eat:grain'] > 0, `untrained at hunger 1 with grain on offer: eats grain (${n['eat:grain']}), never a villager (${n['eat:villager']})`);
+  else check(n['eat:villager'] > 0, `control, untrained at hunger 1 with no grain anywhere: it does eat a villager (${n['eat:villager']}), so villagers were within reach`);
+}
+
+// ---- training still decides: three strokes right after a forced act make it frequent; one slap
+// makes it never happen
+for (const k of HARM) {
+  const count = (train) => {
+    const game = bootGame(13);
+    const { events } = game;
+    const cs = game.systems.creature;
+    game.clock.run(5 * 30, game.tick);
+    let n = 0, pending = false, fed = 0;
+    events.on('act', (a) => { if (a.actor === 'creature' && keyOf(a) === k) { n++; if (fed < Math.abs(train)) pending = true; } });
+    if (train) {
+      cs.debug.candidateFilter = (c) => c.key === k;
+      for (let i = 0; i < 300 * 30 && fed < Math.abs(train); i++) {
+        game.tick(STEP);
+        if (pending) { pending = false; fed++; events.emit(train > 0 ? 'stroke' : 'slap', { creatureId: cs.entity.id, strength: 1 }); }
+      }
+      cs.debug.candidateFilter = null;
+    }
+    const before = n;
+    game.clock.run(240 * 30, game.tick);
+    return { n: n - before, fed, forbidden: cs.brain.isForbidden(k) };
+  };
+  const plain = count(0), stroked = count(3), slapped = count(-1);
+  check(stroked.fed === 3 && stroked.n >= 5 && stroked.n >= 2 * plain.n,
+    `${k}: stroked 3 times it is chosen ${stroked.n} times in 4 free minutes (untrained ${plain.n})`);
+  check(slapped.fed === 1 && slapped.forbidden && slapped.n === 0, `${k}: slapped once it is never chosen in 4 free minutes (${slapped.n}, forbidden ${slapped.forbidden})`);
+}
+
+// ---- training across seeds 13, 21, 4: each harmful act forced once, then 4 sim minutes of free
+// choice with feedback after every occurrence. Slapped twice, no harmful act happens again, even held
+// at hunger 1. Stroked, eat:villager comes at least 3 times as often as with no feedback. (Stroked
+// throw and smash are checked on seed 13 above: on seed 4 stroked smash came 3 times in this run
+// and 20 times in the same run without hunger held at 0, so a per-seed bound there tests the dice.)
+function trainedRun(seed, key, feedback, hunger) {
+  const game = bootGame(seed);
+  const { events } = game;
+  const cs = game.systems.creature;
+  game.clock.run(5 * 30, game.tick);
+  let n = 0, pending = false;
+  events.on('act', (a) => { if (a.actor === 'creature' && keyOf(a) === key) { n++; pending = true; } });
+  cs.debug.candidateFilter = (c) => c.key === key;
+  for (let i = 0; i < 90 * 30 && n === 0; i++) game.tick(STEP);
+  cs.debug.candidateFilter = null;
+  const feed = () => {
+    if (!pending) return;
+    pending = false;
+    if (!feedback) return;
+    events.emit(feedback, { creatureId: cs.entity.id, strength: 1 });
+    if (feedback === 'slap') events.emit('slap', { creatureId: cs.entity.id, strength: 1 });
+  };
+  feed();
+  const forced = n;
+  cs.debug.holdHunger = hunger;
+  for (let i = 0; i < 240 * 30; i++) { game.tick(STEP); feed(); }
+  cs.debug.holdHunger = null;
+  return { forced, after: n - forced, forbidden: cs.brain.isForbidden(key) };
+}
+for (const key of HARM) {
+  const hunger = key === 'eat:villager' ? 0.8 : 0; // a meal needs hunger; throwing and smashing need boredom only
+  for (const seed of [13, 21, 4]) {
+    const slapped = trainedRun(seed, key, 'slap', 1);
+    if (key === 'eat:villager') {
+      const plain = trainedRun(seed, key, null, hunger), stroked = trainedRun(seed, key, 'stroke', hunger);
+      check(plain.forced === 1 && stroked.forced === 1 && stroked.after >= 4 && stroked.after >= 3 * Math.max(1, plain.after),
+        `seed ${seed}: stroked after each ${key}, it learns to do it often (${stroked.after} in 4 sim minutes vs ${plain.after} with no feedback)`);
+    }
+    check(slapped.forced === 1 && slapped.after === 0 && slapped.forbidden,
+      `seed ${seed}: slapped twice after ${key}, never again in 4 sim minutes at hunger 1 (${slapped.after}, forbidden ${slapped.forbidden})`);
+  }
+}
+
+// ---- movement sampler self-test: it must catch a planted cliff jump and a water tile
+{
+  const W = 8;
+  const height = new Uint8Array(W * W), ground = new Uint8Array(W * W).fill(3);
+  for (let y = 0; y < W; y++) for (let x = 4; x < W; x++) height[y * W + x] = 3; // 3-high cliff at x 3|4
+  ground[6 * W + 1] = 1; // water
+  const game = createGame({ seed: 1 });
+  game.world.loadMap({ w: W, h: W, height, ground, sites: {} });
+  const ok = moveSampler(game.world);
+  for (const [x, y] of [[1.5, 1.5], [2.5, 1.5], [3.5, 2.5], [3.5, 3.5]]) ok.sample(x, y); // legal moves
+  check(ok.bad.water + ok.bad.step + ok.bad.jump === 0 && ok.steps === 3, `sampler passes legal moves (${JSON.stringify(ok.bad)})`);
+  const cliff = moveSampler(game.world);
+  cliff.sample(3.5, 2.5); cliff.sample(4.5, 2.5);
+  check(cliff.bad.step === 1, `sampler catches a planted 3-high cliff step (${cliff.bad.first})`);
+  const wet = moveSampler(game.world);
+  wet.sample(1.5, 5.5); wet.sample(1.5, 6.5);
+  check(wet.bad.water === 1, `sampler catches a planted water tile (${wet.bad.first})`);
+  const hop = moveSampler(game.world);
+  hop.sample(1.5, 1.5); hop.sample(3.5, 1.5);
+  check(hop.bad.jump === 1, `sampler catches a planted two-tile jump (${hop.bad.first})`);
+}
+
+// ---- cliff map: a 3-high cliff and a ramp of a 2 step then a 1 step; water strip on the low side
+{
+  const W = 16;
+  const height = new Uint8Array(W * W), ground = new Uint8Array(W * W).fill(3);
+  for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    height[i] = x < 8 ? 2 : 5; // the cliff between x 7 and 8 is 3 high
+    if (y >= 12 && x === 8) height[i] = 4; // ramp: 2 -> 4 -> 5
+    if (y === 6 && x < 6) ground[i] = 1; // water across most of the low side
+  }
+  const game = createGame({ seed: 1 });
+  game.world.loadMap({ w: W, h: W, height, ground, sites: { creatureStart: { x: 2, y: 2 } } });
+  const cs = game.systems.creature;
+  cs.setup();
+  const e = cs.entity;
+  const s = moveSampler(game.world);
+  game.events.emit('tether', { creatureId: e.id, x: 13.5, y: 2.5 });
+  let maxY = 0, arrived = null;
+  for (let i = 0; i < 90 * 30 && arrived === null; i++) {
+    game.tick(1 / 30);
+    s.sample(e.x, e.y);
+    maxY = Math.max(maxY, e.y);
+    if (cs.state().tether?.arrived) arrived = i / 30;
+  }
+  check(arrived !== null && Math.floor(e.x) >= 12, `cliff map: tethered across, arrived on the high side in ${arrived?.toFixed(1)} s at ${e.x.toFixed(1)},${e.y.toFixed(1)}`);
+  check(maxY >= 12, `cliff map: took the ramp (reached row ${Math.floor(maxY)}), not the 3-high cliff`);
+  check(s.steps > 10 && s.bad.water + s.bad.step + s.bad.jump === 0, `cliff map: ${s.steps} tile steps, none over ${CREATURE.maxStep} height or into water (${JSON.stringify(s.bad)})`);
+}
+
+// ---- tether by the sea, a tether for another creature, hp 0, removal
+{
+  const game = newGame(3);
+  const cs = game.systems.creature;
+  const { world, events } = game;
+  game.clock.run(30, game.tick);
+  const e = cs.entity;
+  // a water tile 2 tiles east of walkable ground the creature can reach, with water between
+  const f = cs.paths.field(Math.floor(e.y) * world.w + Math.floor(e.x));
+  let sea = null;
+  for (let i = 0; i < f.dist.length && !sea; i++) {
+    if (world.ground[i] >= 2) continue;
+    const x = i % world.w, y = (i / world.w) | 0;
+    if (x < 2 || !Number.isFinite(f.dist[i - 2]) || f.dist[i - 2] > 30) continue;
+    if (world.ground[i - 1] >= 2) continue;
+    sea = { x: x + 0.5, y: y + 0.5 };
+  }
+  check(!!sea, `found a sea tile 2 tiles off a reachable shore (${JSON.stringify(sea)})`);
+  const s = moveSampler(world);
+  events.emit('tether', { creatureId: e.id, x: sea.x, y: sea.y });
+  let arrived = false;
+  for (let i = 0; i < 45 * 30 && !arrived; i++) { game.tick(1 / 30); s.sample(e.x, e.y); arrived = !!cs.state().tether?.arrived; }
+  const g = world.ground[Math.floor(e.y) * world.w + Math.floor(e.x)];
+  const off = Math.hypot(e.x - sea.x, e.y - sea.y);
+  check(arrived && g >= 2 && g <= 4 && off <= CREATURE.tetherRadius + 0.5, `tether to the sea stops on the shore (ground ${g} at ${e.x.toFixed(1)},${e.y.toFixed(1)}, ${off.toFixed(1)} from the point)`);
+  check(s.bad.water + s.bad.step + s.bad.jump === 0, `tether walk to the shore: never in water (${JSON.stringify(s.bad)})`);
+  const before = JSON.stringify(cs.state().tether);
+  events.emit('tether', { creatureId: e.id + 999, x: e.x + 6, y: e.y });
+  events.emit('slap', { creatureId: e.id + 999, strength: 1 });
+  check(JSON.stringify(cs.state().tether) === before && cs.state().feedback === null, 'tether and slap for another creature id are ignored');
+  e.hp = 0;
+  game.tick(1 / 30);
+  check(cs.entity === e && e.hp === 1 && world.get(e.id) === e, 'hp set to 0 is back to 1 next tick');
+  const at = { x: e.x, y: e.y }, brain = cs.brain;
+  world.remove(e.id);
+  game.tick(1 / 30);
+  const e2 = cs.entity;
+  check(e2 && e2 !== e && world.get(e2.id) === e2 && e2.hp === 1 && Math.hypot(e2.x - at.x, e2.y - at.y) < 0.5 && cs.brain === brain && world.query({ kind: 'creature' }).length === 1,
+    `removed from the world: comes back where it stood with the same brain (${e2?.x?.toFixed(1)},${e2?.y?.toFixed(1)})`);
+}
+
+// ---- sources: no Math.random, no DOM in the creature code
+{
+  const files = ['src/systems/creature.js', ...readdirSync('src/creature').map((f) => `src/creature/${f}`)];
+  for (const f of files) {
+    const src = readFileSync(f, 'utf8').replace(/\/\/.*$/gm, '');
+    check(!/Math\.random/.test(src), `${f}: no Math.random`);
+    check(!/\b(window|document|HTMLCanvasElement|getContext)\b/.test(src), `${f}: no DOM access`);
+  }
+}
+
+console.log(`\ncheck-creature: ${passes} passed, ${fails.length} failed`);
+process.exitCode = fails.length ? 1 : 0;
