@@ -4,7 +4,8 @@
 // worldToScreen of its center; side faces appear only where a front neighbor is lower (and do appear
 // there on an unoccluded test map); rock entities spawn once, and again per map after world.loadMap
 // (never duplicated, in the draw list on the first frame after a reload, none for a rock-less map,
-// exactly its own for a map with 2 rocks); the cache rebuilds on map change; the
+// exactly its own for a map with 2 rocks); liveRocks gives the map records only until the rocks
+// are entities, then the entities alone (moved, removed, all gone, a scenario's own rock); the cache rebuilds on map change; the
 // tree, stump and rock painters give non-empty, deterministic sprites anchored at their base;
 // update() touches no DOM; no Math.random in terrain code.
 import { readFileSync, readdirSync } from 'node:fs';
@@ -238,6 +239,41 @@ function faceCounts(world, cache) {
   renderer.render();
   const two = world.query({ kind: 'rock' });
   ok(two.length === 2 && two.some((r) => r.x === 3.5 && r.y === 3.5 && r.size === 1) && two.some((r) => r.x === 6.5 && r.y === 2.5 && r.size === 3), `a map with its own 2 rocks spawns exactly those (${two.length})`);
+}
+
+// ------------------------------------------------------------------ system: live rocks (round 39)
+// liveRocks(world) is the one list of rocks the village (placement) and the creature (sensing) use:
+// the map's rock records until the terrain system has made entities for that map, the rock entities
+// from then on (even when none are left). world.rocks stays the map's authored list.
+{
+  const live = terrainSystem.liveRocks;
+  ok(typeof live === 'function', 'terrain exports liveRocks(world)');
+  if (typeof live === 'function') {
+    const game = createGame({ seed: 4 });
+    const { world } = game;
+    const N = island.rocks.length;
+    const ents = () => world.query({ kind: 'rock' });
+    const isEnts = (list) => list.length === ents().length && list.every((r) => r.kind === 'rock' && world.get(r.id) === r);
+    ok(isEnts(live(world)) && live(world).length === N, `after create: ${live(world).length} live rocks, all entities`);
+    world.loadMap(buildIsland());
+    ok(live(world) === world.rocks && live(world).length === N, 'after loadMap and before a tick: the map records are the live rocks');
+    game.tick(1 / 30);
+    ok(isEnts(live(world)) && live(world).length === N, 'after one tick: the rock entities are');
+    const [a, b] = ents();
+    world.move(a, a.x + 3, a.y, a.z);
+    world.remove(b.id);
+    ok(isEnts(live(world)) && live(world).length === N - 1 && live(world).includes(a) && world.rocks.length === N,
+      `a moved rock counts where it lies, a removed one not at all, and the map keeps its ${world.rocks.length} records`);
+    for (const r of ents()) world.remove(r.id);
+    game.tick(1 / 30);
+    ok(live(world).length === 0 && ents().length === 0 && terrainSystem.spawnRocks(world) === 0 && ents().length === 0,
+      `with every rock gone: no live rocks, nothing respawned, records not offered (${live(world).length})`);
+    world.loadMap(buildIsland());
+    const own = world.spawn('rock', { x: 10.5, y: 10.5, size: 1 });
+    ok(live(world).length === 1 && live(world)[0] === own, 'own rock placed right after loadMap: it is the only live rock, before a tick');
+    game.tick(1 / 30);
+    ok(live(world).length === 1 && live(world)[0] === own && ents().length === 1, 'and after a tick');
+  }
 }
 
 // ------------------------------------------------------------------ painters

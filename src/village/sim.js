@@ -25,8 +25,33 @@
 // births then take over as houses and grain return.
 import { VILLAGE as T, KINDS, PLACEABLE, START_LAYOUT, RIVAL_PLAN } from './config.js';
 import { createPaths } from './path.js';
+import { liveRocks } from '../systems/terrain.js';
 
 const OWNERS = ['player', 'rival'];
+
+/** True for a thing resting on the ground that a villager may take: not in the hand, not in flight
+ * (the hand and the creature set `airborne` while their flight physics moves it) and not sinking in
+ * the sea (the hand sets `sinking` until it removes it). Before round 39 the village tested a
+ * `flying` field that nothing sets, so villagers took thrown wood and grain mid-air and felled
+ * trees in flight. Used by item and tree selection and again at the moment of pickup or felling,
+ * since a thing can be thrown between choosing it and reaching it. */
+export const grounded = (e) => !e.held && !e.airborne && !e.sinking;
+
+/** Puts wood item `it` into blueprint `site`, no more than the site still needs (woodCost -
+ * woodHave): the item keeps the rest and is removed from the world only once empty, so a big load
+ * is never sunk into a nearly full site. A site with all its wood in moves on to 'building'. Returns
+ * the logs put in. Shared by the village's builders (unload) and the creature's haul, so both
+ * deliver by the same rule (round 39: the creature added its whole load and lost the surplus). */
+export function putWood(world, site, it) {
+  const amount = it.amount ?? 1;
+  const n = Math.min(amount, Math.max(0, site.woodCost - site.woodHave));
+  site.woodHave += n;
+  it.amount = amount - n;
+  if (it.amount <= 0) world.remove(it.id);
+  if (site.woodHave >= site.woodCost) site.stage = 'building';
+  return n;
+}
+
 /** Position of a building type in rebuildOrder (types not listed come last). */
 const rank = (t) => { const i = T.rebuildOrder.indexOf(t); return i < 0 ? T.rebuildOrder.length : i; };
 
@@ -107,7 +132,9 @@ export function createVillageSim(game) {
         return { ok: false, reason: 'overlaps a building' };
     }
     const inside = (p) => p.x >= ox && p.x < ox + k.fw && p.y >= oy && p.y < oy + k.fh;
-    if (world.rocks.some(inside) || world.query({ kind: 'rock' }).some(inside)) return { ok: false, reason: 'a rock is in the way' };
+    // liveRocks: the map's rock records only until the terrain system has made them entities, then
+    // the entities alone, so a rock the hand carried off frees its old tile (src/systems/terrain.js).
+    if (liveRocks(world).some(inside)) return { ok: false, reason: 'a rock is in the way' };
     if (!setup && world.query({ kind: 'tree' }).some((t) => !t.held && inside(t))) return { ok: false, reason: 'trees are in the way' };
     return { ok: true, reason: null, ox, oy };
   }
@@ -454,11 +481,11 @@ export function createVillageSim(game) {
   }
   function looseNear(v, kind) {
     const list = world.query({ kind, x: v.x, y: v.y, r: T.looseItemRadius })
-      .filter((it) => !it.held && !it.carriedBy && !it.flying && !bad(v, it.id) && paths.walkable(Math.floor(it.x), Math.floor(it.y)));
+      .filter((it) => grounded(it) && !it.carriedBy && !bad(v, it.id) && paths.walkable(Math.floor(it.x), Math.floor(it.y)));
     return nearest(list, v.x, v.y);
   }
   function pickUp(v, it) {
-    if (!live(it) || it.held || it.carriedBy) return;
+    if (!live(it) || !grounded(it) || it.carriedBy) return; // thrown since it was chosen: leave it
     it.carriedBy = v.id;
     v.carry = it.id;
   }
@@ -606,11 +633,8 @@ export function createVillageSim(game) {
   /** Puts carried wood into blueprint `site`, no more than it still needs (the rest stays carried, so
    * a big salvage load is never sunk into a small site). Returns the logs put in. */
   function unload(v, it, site) {
-    const n = Math.min(it.amount, Math.max(0, site.woodCost - site.woodHave));
-    site.woodHave += n;
-    it.amount -= n;
-    if (it.amount <= 0) { world.remove(it.id); v.carry = null; }
-    if (site.woodHave >= site.woodCost) site.stage = 'building';
+    const n = putWood(world, site, it);
+    if (!live(it)) v.carry = null;
     return n;
   }
 
@@ -651,7 +675,7 @@ export function createVillageSim(game) {
     const taken = new Set();
     for (const o of world.query({ kind: 'villager' })) if (o !== v && o.job === 'woodcutter' && o.target) taken.add(o.target);
     const list = world.query({ kind: 'tree', x: vill.cx, y: vill.cy, r: T.workRadius })
-      .filter((t) => !t.held && !t.flying && !taken.has(t.id) && !(t.burning > 0) && (t.growth ?? 1) >= 0.5 && !bad(v, t.id));
+      .filter((t) => grounded(t) && !taken.has(t.id) && !(t.burning > 0) && (t.growth ?? 1) >= 0.5 && !bad(v, t.id));
     return nearest(list, v.x, v.y);
   }
 
@@ -679,7 +703,7 @@ export function createVillageSim(game) {
           if (isWreck(tree) && !(tree.burning > 0)) return clearWreck(v, tree);
           tree = null;
         }
-        if (!tree || tree.kind !== 'tree' || tree.held) {
+        if (!tree || tree.kind !== 'tree' || !grounded(tree)) {
           // A wreck of ours with timber left in it beats a tree: clearing it yields several logs of
           // salvage and frees the lost building's footprint for its rebuild.
           const wreck = chooseWreck(v, true);
@@ -792,7 +816,7 @@ export function createVillageSim(game) {
   }
 
   function chop(v, tree) {
-    if (!live(tree) || tree.held) return;
+    if (!live(tree) || !grounded(tree)) return; // thrown while the axe was swinging: nothing felled
     removeTree(tree);
     spawnItem('wood', v, T.treeYield);
     v.target = null;

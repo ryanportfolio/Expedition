@@ -3,7 +3,9 @@
 // the world (eat, throw, smash, haul, water, play, sleep, poop, idle, wander). haul:wood picks up
 // loose wood or fells a tree and carries it to a player blueprint that needs wood, else a player
 // woodpile (wood, woodDelivered); with a blueprint it may also take wood from a player woodpile,
-// so hauling shows up in free play without a blueprint. Stroke and slap
+// so hauling shows up in free play without a blueprint. The destination is checked again when the
+// load goes in (it may be gone or full by then: the load is set down), and a blueprint takes only
+// the wood it still needs (putWood, shared with the village's builders). Stroke and slap
 // events teach the brain; a tether event sends it to a point where it stays for a while.
 // Untrained, it holds back from harm (tunables `harm`, `harmCooldown`): eat:villager, throw:villager
 // and smash:building come at most once per cooldown per victim kind, and grain beats villagers when
@@ -27,6 +29,7 @@ import { CREATURE as T } from '../creature/tunables.js';
 import { stepBody } from '../hand/flight.js';
 import { HAND } from '../hand/tunables.js';
 import { VILLAGE } from '../village/config.js';
+import { putWood } from '../village/sim.js';
 import { getSprite } from '../art/registry.js';
 import { makeLut } from '../art/lut.js';
 import '../creature/placeholder-art.js'; // creature and dung stand-ins until the painter lands
@@ -206,8 +209,13 @@ export function create(game) {
     }
     if (brain.canThrow) {
       for (const tr of near('tree')) if (free(tr) && (tr.growth ?? 1) >= 0.5 && !(tr.burning > 0)) add('throw:tree', ent(tr));
+      // Rock entities only. The map's rock records (world.rocks) are authored data: the terrain
+      // system turns them into entities in its update, which runs before this system in every tick
+      // (SYSTEM_ORDER), so by the time the creature senses, the entities are the live rocks (see
+      // liveRocks in src/systems/terrain.js). Before round 39 the records were offered as well, so a
+      // rock the hand had carried off was still offered at its map spot, and throwing that phantom
+      // spawned a second rock entity and cut the record out of the map's list.
       for (const r of near('rock')) if (free(r)) add('throw:rock', ent(r));
-      for (const r of world.rocks) if (Math.hypot(r.x - cx, r.y - cy) <= R) add('throw:rock', { id: null, kind: 'rock', x: r.x, y: r.y, mapRock: r });
     }
     // haul:wood: loose wood or a tree to fell, whenever a player blueprint or woodpile can take it
     const dests = haulDests();
@@ -288,14 +296,12 @@ export function create(game) {
   function targetObj() {
     const t = act.c.target;
     if (!t) return null;
-    if (t.mapRock) return world.rocks.includes(t.mapRock) ? t.mapRock : null;
     const o = world.get(t.id);
     return o && o.kind === t.kind ? o : null;
   }
 
   function stillValid(o) {
     if (!o) return false;
-    if (act.c.target.mapRock) return true;
     if (o.kind === 'building') return usableBuilding(o) && (act.verb !== 'haul' || o.wood >= 1);
     if (!free(o)) return false;
     return o.kind !== 'villager' || (o.hp > 0 && !(o.dying > 0));
@@ -340,11 +346,6 @@ export function create(game) {
     const { verb } = act;
     if (verb === 'eat' && o?.kind === 'villager') hold(o);
     if (verb === 'throw') {
-      if (act.c.target.mapRock) {
-        // a map rock becomes a rock entity when the creature picks it up
-        world.rocks.splice(world.rocks.indexOf(o), 1);
-        o = world.spawn('rock', { x: o.x, y: o.y, vx: 0, vy: 0, vz: 0, size: o.size, grabbable: true, sprite: getSprite('rock', { size: o.size ?? 1 }) });
-      }
       if (o.kind === 'tree') o.uprooted = true;
       hold(o);
     }
@@ -435,24 +436,37 @@ export function create(game) {
           act.c.target = { id: dest.b.id, kind: 'building', x: dest.b.x, y: dest.b.y };
           return;
         }
+        // Put the load in. arrive() checked the destination when the creature got there, but the
+        // pose lasts T.duration.haul seconds and the world moves on meanwhile: the blueprint can be
+        // replaced (placeBlueprint removes an open re-placed one), burned, wrecked, cleared, filled
+        // by builders or turned into a site under construction. So the destination is looked up and
+        // validated again here, by the same rules that chose it (needsWood / playerPile). Before
+        // round 39 a vanished destination left d undefined and needsWood(d) threw, which stopped the
+        // game loop; a wrecked woodpile still took the load.
         const d = world.get(act.dest);
         const item = letGo(false);
         if (!item) return abort('lost-load');
-        const amount = item.amount ?? 1;
-        const field = needsWood(d) ? 'woodHave' : 'wood', before = d[field];
-        if (needsWood(d)) {
-          d.woodHave += amount;
-          if (d.woodHave >= d.woodCost) d.stage = 'building';
-        } else if (d.type === 'woodpile') {
+        const setDown = () => world.move(item, entity.x, entity.y, world.heightAt(entity.x, entity.y));
+        if (d && needsWood(d)) {
+          // Only what the blueprint still needs goes in (putWood, the builders' rule too); the rest
+          // stays a wood item set down at the creature's feet for the village or another haul.
+          // Before round 39 the whole load went in and the surplus was lost.
+          const before = d.woodHave;
+          putWood(world, d, item);
+          if (live(item)) setDown();
+          return complete(undefined, { id: d.id, field: 'woodHave', before, after: d.woodHave });
+        }
+        if (d && playerPile(d)) {
+          const amount = item.amount ?? 1, before = d.wood;
           d.wood += amount;
           const vill = game.systems.village?.sim?.village?.(d.owner);
           if (vill) vill.woodDelivered += amount;
-        } else {
-          world.move(item, entity.x, entity.y, world.heightAt(entity.x, entity.y));
-          return abort('dest-full');
+          world.remove(item.id);
+          return complete(undefined, { id: d.id, field: 'wood', before, after: d.wood });
         }
-        world.remove(item.id);
-        return complete(undefined, { id: d.id, field, before, after: d[field] });
+        // gone, or no longer takes wood (full, under construction, wrecked): set the whole load down
+        setDown();
+        return abort(d ? 'dest-full' : 'dest-gone');
       }
       case 'poop': {
         const d = world.spawn('dung', { x: entity.x + 0.3, y: entity.y + 0.3, vx: 0, vy: 0, vz: 0, grabbable: false, sprite: getSprite('dung') });
@@ -471,8 +485,8 @@ export function create(game) {
     if (act.phase === 'walk') {
       if (act.verb === 'eat' || act.verb === 'throw') {
         // a moving target: keep chasing its current tile once the path runs out
-        const o = act.stage === 0 && act.c.target && !act.c.target.mapRock ? targetObj() : null;
-        if (act.c.target && !act.c.target.mapRock && !o) return abort('target-gone');
+        const o = act.stage === 0 && act.c.target ? targetObj() : null;
+        if (act.c.target && !o) return abort('target-gone');
       }
       if (act.pi < act.path.length) {
         const i = act.path[act.pi];
@@ -592,7 +606,7 @@ export function create(game) {
     state() {
       return {
         id: entity?.id ?? null, x: entity?.x, y: entity?.y, z: entity?.z, pose, frame: frameNow(), facing,
-        action: act ? { key: act.key, phase: act.phase, stage: act.stage, target: act.c.target ? { ...act.c.target, mapRock: undefined } : null } : null,
+        action: act ? { key: act.key, phase: act.phase, stage: act.stage, target: act.c.target ? { ...act.c.target } : null } : null,
         waiting: !act && wait > 0,
         needs: { ...brain.needs }, weak: brain.weak, speedMult: brain.speedMult, canThrow: brain.canThrow,
         lean: brain.alignmentLean(), leanStep: leanStep(brain.alignmentLean()),

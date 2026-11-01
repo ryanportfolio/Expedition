@@ -8,7 +8,10 @@
 // Extra cases: a cliff map (a 3-high cliff and a 2-then-1 ramp: it takes the ramp, never steps more
 // than 2, never into water), the movement sampler catching a planted cliff jump and water tile, a
 // tether next to the sea stops on the shore, a tether for another creature id is ignored, hp 0 is
-// restored and a removed creature comes back. Untrained defaults on seeds 13, 21, 4 (harm limits,
+// restored and a removed creature comes back. Haul delivery on a flat map (round 39): a blueprint
+// removed or a woodpile wrecked while the load goes in (no crash, the load is set down), a blueprint
+// one log short of a two-log load (one goes in, one is set down). Rocks: a rock the hand moved is
+// offered only where it lies, and throwing it leaves one rock entity and the map's rock list. Untrained defaults on seeds 13, 21, 4 (harm limits,
 // grain over villagers, temples stand) and training on the same seeds (slapped twice: no harmful act
 // again at hunger 1; stroked: eat:villager often). Runtime traps: Math.random and the browser globals
 // (document, window, requestAnimationFrame, localStorage, HTMLCanvasElement, Image) are counted from
@@ -335,6 +338,84 @@ for (const key of HARM) {
   const e2 = cs.entity;
   check(e2 && e2 !== e && world.get(e2.id) === e2 && e2.hp === 1 && Math.hypot(e2.x - at.x, e2.y - at.y) < 0.5 && cs.brain === brain && world.query({ kind: 'creature' }).length === 1,
     `removed from the world: comes back where it stood with the same brain (${e2?.x?.toFixed(1)},${e2?.y?.toFixed(1)})`);
+}
+
+// ---- haul delivery (round 39). A flat 16x16 grass map with no village: one player destination
+// building spawned by hand and one wood load beside the creature; only haul:wood of that load is
+// offered. (1) The destination vanishes or stops being valid while the load is being put in: no
+// crash, the whole load is set down on the ground. (2) A blueprint short of fewer logs than the load
+// holds takes only what it needs; the rest is set down at the creature's feet.
+function haulCase(dest, load = 2) {
+  const W = 16;
+  const game = createGame({ seed: 1 });
+  const { world } = game;
+  world.loadMap({ w: W, h: W, height: new Uint8Array(W * W).fill(1), ground: new Uint8Array(W * W).fill(3), sites: { creatureStart: { x: 3, y: 3 } } });
+  const cs = game.systems.creature;
+  cs.setup();
+  const b = world.spawn('building', { x: 11, y: 11, vx: 0, vy: 0, vz: 0, tx: 10, ty: 10, fw: 2, fh: 2, owner: 'player', hp: 1, burning: 0, flammable: false, grabbable: false, wood: 0, grain: 0, ...dest });
+  const wood = world.spawn('wood', { x: 4.5, y: 3.5, vx: 0, vy: 0, vz: 0, amount: load, grabbable: true });
+  cs.debug.candidateFilter = (c) => c.key === 'haul:wood' && c.target?.id === wood.id;
+  /** Ticks until cond() (checked before each tick) or maxSec; true when cond() held. */
+  const run = (cond, maxSec = 40) => { for (let i = 0; i < maxSec * 30; i++) { if (cond()) return true; game.tick(1 / 30); } return cond(); };
+  const putting = () => cs.state().action?.key === 'haul:wood' && cs.state().action.stage === 1 && cs.state().action.phase === 'do';
+  const last = () => [...cs.history].reverse().find((r) => r.key === 'haul:wood' && r.phase !== 'choose' && r.phase !== 'start');
+  const onGround = (w) => !!w && !w.held && !w.carriedBy && Math.abs(w.z - world.heightAt(w.x, w.y)) < 1e-6;
+  return { game, world, cs, b, wood, run, putting, last, onGround };
+}
+{
+  const h = haulCase({ type: 'house', stage: 'blueprint', woodCost: 4, woodHave: 0 });
+  const reached = h.run(h.putting);
+  h.world.remove(h.b.id); // replaced by another blueprint, burned away or cleared while the load goes in
+  let err = null;
+  try { for (let i = 0; i < 60; i++) h.game.tick(1 / 30); } catch (e) { err = e; }
+  const w = h.world.get(h.wood.id);
+  check(reached && !err && h.onGround(w) && w.amount === 2 && /^abort/.test(h.last()?.phase ?? ''),
+    `haul: blueprint removed while the load is put in: no crash, the whole load is set down (${err ? `threw ${err.message}` : `${h.last()?.phase}, ${w?.amount} logs, on the ground ${h.onGround(w)}`})`);
+}
+{
+  const h = haulCase({ type: 'woodpile', stage: 'done' });
+  const reached = h.run(h.putting);
+  h.b.hp = 0; h.b.stage = 'wrecked'; // burned down while the load goes in
+  let err = null;
+  try { for (let i = 0; i < 60; i++) h.game.tick(1 / 30); } catch (e) { err = e; }
+  const w = h.world.get(h.wood.id);
+  check(reached && !err && h.b.wood === 0 && h.onGround(w) && w.amount === 2 && /^abort/.test(h.last()?.phase ?? ''),
+    `haul: woodpile wrecked while the load is put in: nothing goes into the wreck, the load is set down (${err ? `threw ${err.message}` : `${h.last()?.phase}, pile ${h.b.wood}, ${w?.amount} logs on the ground ${h.onGround(w)}`})`);
+}
+{
+  const h = haulCase({ type: 'house', stage: 'blueprint', woodCost: 4, woodHave: 3 });
+  const done = h.run(() => h.last()?.phase === 'complete');
+  const fx = h.last()?.effect;
+  const w = h.world.get(h.wood.id), e = h.cs.entity;
+  check(done && h.b.woodHave === 4 && h.b.stage === 'building' && fx?.field === 'woodHave' && fx.before === 3 && fx.after === 4,
+    `haul: a blueprint 1 log short takes 1 of a 2-log load (woodHave ${h.b.woodHave} of ${h.b.woodCost}, stage ${h.b.stage}, effect ${JSON.stringify(fx)})`);
+  check(h.onGround(w) && w.amount === 1 && Math.hypot(w.x - e.x, w.y - e.y) < 1e-6,
+    `haul: the surplus log stays a wood item at the creature's feet (${w ? `${w.amount} logs, on the ground ${h.onGround(w)}, ${Math.hypot(w.x - e.x, w.y - e.y).toFixed(2)} from it` : 'gone'})`);
+}
+
+// ---- rocks (round 39): once the terrain system has made rock entities for a map, the creature
+// senses only those. A rock the hand moved is offered where it lies now, never again at the map's
+// original spot, and throwing it leaves the map's authored rock list alone (no second entity).
+{
+  const W = 16;
+  const game = createGame({ seed: 1 });
+  const { world } = game;
+  world.loadMap({ w: W, h: W, height: new Uint8Array(W * W).fill(1), ground: new Uint8Array(W * W).fill(3), rocks: [{ x: 5.5, y: 3.5, size: 1 }], sites: { creatureStart: { x: 3, y: 3 } } });
+  const cs = game.systems.creature;
+  cs.setup();
+  game.tick(1 / 30); // the terrain system turns the map rock into an entity
+  const rock = world.query({ kind: 'rock' })[0];
+  world.move(rock, 9.5, 8.5, world.heightAt(9.5, 8.5)); // the player carried it off
+  const seen = [];
+  cs.debug.candidateFilter = (c) => { if (c.key === 'throw:rock') seen.push(c.target); return false; };
+  for (let i = 0; i < 40 * 30 && !seen.length; i++) game.tick(1 / 30); // the first decision (made before the filter) may run a while
+  check(seen.length > 0 && seen.every((t) => t.id === rock.id && t.x === 9.5 && t.y === 8.5),
+    `rocks: a moved rock is offered where it lies, not at its map spot (${JSON.stringify(seen.map((t) => ({ id: t.id, x: t.x, y: t.y })))}, rock #${rock.id})`);
+  cs.debug.candidateFilter = (c) => c.key === 'throw:rock';
+  let thrown = false;
+  for (let i = 0; i < 40 * 30 && !thrown; i++) { game.tick(1 / 30); thrown = cs.history.some((r) => r.key === 'throw:rock' && r.phase === 'complete'); }
+  check(thrown && world.query({ kind: 'rock' }).length === 1 && world.rocks.length === 1,
+    `rocks: throwing it keeps one rock entity and the map's rock list (${thrown ? 'thrown' : 'not thrown'}, ${world.query({ kind: 'rock' }).length} entities, ${world.rocks.length} map rocks)`);
 }
 
 // ---- sources: no Math.random, no DOM in the creature code

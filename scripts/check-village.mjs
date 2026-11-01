@@ -4,8 +4,9 @@
 // and determinism; then wreck clearing, pathfinding on a synthetic cliff and water map, a dropped
 // wood load, the same core behaviour for seeds 2-12, and a 10-minute chaos run of hand and miracle
 // abuse; recovery after fire (a rock dropped on a lost building's spot; no re-placed blueprint
-// covers a rock), settlers, fire on the village every 60 s, and stone temples. Exits 1 and prints
-// each failing check.
+// covers a rock), settlers, fire on the village every 60 s, and stone temples. Round 39: placement
+// tests live rocks (a moved rock frees its map tile and blocks its new one), and villagers never
+// pick up wood or fell trees that are airborne or sinking. Exits 1 and prints each failing check.
 //
 //   node scripts/check-village.mjs
 import { createGame } from '../src/game.js';
@@ -14,6 +15,7 @@ import { createRng } from '../src/engine/rng.js';
 import { VILLAGE } from '../src/village/config.js';
 import { createPaths } from '../src/village/path.js';
 import { HAND } from '../src/hand/tunables.js';
+import { liveRocks } from '../src/systems/terrain.js';
 
 const fails = [];
 let passes = 0;
@@ -684,14 +686,14 @@ const overlaps = (game) => {
     // just before its 'building-placed' event. The value itself need not stay 'water': the rival's
     // growth plan places through placeBlueprint too.
     let reason = vs.sim.lastReason, nullWrite = false, autoPlaced = 0, autoTouched = 0, onRock = 0;
-    const rocks = game.world.rocks.length + game.world.query({ kind: 'rock' }).length;
+    const rocks = liveRocks(game.world).length;
     Object.defineProperty(vs.sim, 'lastReason', { configurable: true, enumerable: true, get: () => reason, set: (v) => { reason = v; if (v === null) nullWrite = true; } });
     game.events.on('building-placed', (p) => {
       const nb = game.world.get(p.buildingId);
       if (nb?.auto) {
         autoPlaced++; if (nullWrite) autoTouched++;
         const inside = (q) => q.x >= nb.tx && q.x < nb.tx + nb.fw && q.y >= nb.ty && q.y < nb.ty + nb.fh;
-        if (game.world.rocks.some(inside) || game.world.query({ kind: 'rock' }).some(inside)) onRock++;
+        if (liveRocks(game.world).some(inside)) onRock++; // the rocks validate() tests
       }
       nullWrite = false;
     });
@@ -1036,6 +1038,70 @@ const overlaps = (game) => {
   for (let i = 0; i < VILLAGE.fleeTime * 30; i++) { game.tick(1 / 30); samplerB.tick(); if (onRock(v2)) rockB++; }
   check(to >= 0 && rockB === 0 && samplerB.bad === 0 && samplerB.steps > 0,
     `flee: a villager thrown mid-flee to ${bx.toFixed(1)},${by.toFixed(1)} keeps off the rock between it and its old flee tile ${tx},${ty} (${rockB} ticks on rock, ${samplerB.steps} steps, ${samplerB.bad} bad${samplerB.first ? `: ${samplerB.first}` : ''})`);
+}
+
+// ---- live rocks (round 39): placement tests the map's rock records only until the terrain system
+// has turned them into rock entities; from then on only the entities count, so a tile a rock was
+// carried off is free and the tile it was put down on is blocked.
+{
+  const game = createGame({ seed: 1 });
+  const { world } = game;
+  world.loadMap(buildIsland());
+  const vs = game.systems.village;
+  vs.setup();
+  const opts = { setup: true }; // isolates the ground, building and rock rules from influence and trees
+  const rec = world.rocks.find((r) => vs.validate('house', Math.floor(r.x), Math.floor(r.y), 'player', opts).reason === 'a rock is in the way');
+  check(!!rec, `live rocks: before the first tick a map rock record blocks a house on its tile (${rec ? `${rec.x},${rec.y}` : 'none found'})`);
+  game.tick(1 / 30);
+  const tx = Math.floor(rec.x), ty = Math.floor(rec.y);
+  const rock = world.query({ kind: 'rock' }).find((r) => r.x === rec.x && r.y === rec.y);
+  check(!!rock && vs.validate('house', tx, ty, 'player', opts).reason === 'a rock is in the way', 'live rocks: after the first tick its rock entity blocks the same tile');
+  // somewhere free to put it down: the nearest tile a house fits on
+  let to = null;
+  for (let r = 3; r <= 12 && !to; r++)
+    for (let dy = -r; dy <= r && !to; dy++)
+      for (let dx = -r; dx <= r && !to; dx++)
+        if (Math.max(Math.abs(dx), Math.abs(dy)) === r && vs.validate('house', tx + dx, ty + dy, 'player', opts).ok) to = { tx: tx + dx, ty: ty + dy };
+  world.move(rock, to.tx + 0.5, to.ty + 0.5, world.heightAt(to.tx + 0.5, to.ty + 0.5)); // the hand carried it there
+  const old = vs.validate('house', tx, ty, 'player', opts), now = vs.validate('house', to.tx, to.ty, 'player', opts);
+  check(old.ok && now.reason === 'a rock is in the way',
+    `live rocks: once moved, its old tile ${tx},${ty} takes a house (${old.reason ?? 'ok'}) and its new tile ${to.tx},${to.ty} does not (${now.reason ?? 'ok'})`);
+  check(world.rocks.includes(rec), 'live rocks: the map keeps its authored rock records');
+}
+
+// ---- items and trees in flight (round 39): villagers never pick up wood that is airborne (thrown by
+// the hand or the creature) or sinking, and never fell a tree that is.
+{
+  const game = newGame(1);
+  const { world } = game;
+  game.clock.run(30 * 30, game.tick);
+  const cutter = villagers(game, 'player').find((v) => v.job === 'woodcutter' && !v.carry) ?? villagers(game, 'player').find((v) => v.job === 'woodcutter');
+  const at = (v) => ({ x: Math.floor(v.x) + 0.5, y: Math.floor(v.y) + 0.5 });
+  const p = at(cutter);
+  const flying = world.spawn('wood', { x: p.x, y: p.y, z: world.heightAt(p.x, p.y), vx: 0, vy: 0, vz: 0, amount: 2, grabbable: true, airborne: true });
+  const sinking = world.spawn('wood', { x: p.x, y: p.y, z: world.heightAt(p.x, p.y), vx: 0, vy: 0, vz: 0, amount: 2, grabbable: true, sinking: true });
+  let taken = 0;
+  for (let i = 0; i < 20 * 30; i++) { game.tick(1 / 30); if (flying.carriedBy || sinking.carriedBy || !world.get(flying.id) || !world.get(sinking.id)) taken++; }
+  check(taken === 0, `in flight: wood flagged airborne or sinking at a woodcutter's feet is never picked up in 20 s (${taken} ticks taken)`);
+  flying.airborne = false; // it landed
+  let picked = false;
+  for (let i = 0; i < 40 * 30 && !picked; i++) { game.tick(1 / 30); picked = !!flying.carriedBy || !world.get(flying.id); }
+  check(picked, 'in flight: the same wood is picked up once it has landed (the check above can fail)');
+
+  const trees = () => world.query({ kind: 'tree' });
+  const felled = (flag) => {
+    const before = new Set(trees().map((t) => t.id));
+    for (const t of trees()) t[flag] = true;
+    for (let i = 0; i < 30 * 30; i++) game.tick(1 / 30);
+    for (const t of trees()) t[flag] = false;
+    return [...before].filter((id) => !world.get(id)).length;
+  };
+  const air = felled('airborne'), sink = felled('sinking');
+  const before = new Set(trees().map((t) => t.id));
+  for (let i = 0; i < 60 * 30; i++) game.tick(1 / 30);
+  const control = [...before].filter((id) => !world.get(id)).length;
+  check(air === 0 && sink === 0 && control > 0,
+    `in flight: no tree felled while every tree is airborne (${air}) or sinking (${sink}) for 30 s; ${control} felled in the next 60 s once they are not`);
 }
 
 console.log(`check-village: ${passes} passed, ${fails.length} failed`);

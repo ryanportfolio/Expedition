@@ -7,6 +7,13 @@
 // through the same spawnRocks as at create: one per map rock, none when rock entities already exist
 // (a scenario that placed its own), none for a map without rocks. Rocks destroyed or carried off on
 // the same map are never respawned.
+// Live rocks (round 39): world.rocks is the map's authored data and is never edited (hasMap and the
+// island checks read it). It describes the live rocks only until spawnRocks has run for that map:
+// from then on the rock entities are the only rocks, wherever the hand or the creature has put them,
+// and none when all are gone. Placement (village validate) and sensing (creature) read liveRocks(),
+// so a rock carried off no longer blocks or shows up at its map spot. Before round 39 they read the
+// records as well, which kept refusing a moved rock's old tile and offered the creature a second,
+// phantom rock there.
 // update(dt) runs on sim ticks and never touches the DOM, canvas or window.
 import { buildIsland } from '../world/island.js';
 import { getSprite } from '../art/registry.js';
@@ -20,8 +27,17 @@ export function hasMap(world) {
   return world.height.some((h) => h !== 0) || world.ground.some((g) => g !== 0);
 }
 
-/** One rock entity per map rock, unless rock entities already exist. Returns the number spawned. */
+// Map rock lists (world.rocks arrays; world.loadMap makes a new one per map) that spawnRocks has
+// handled: turned into entities, or passed over because a scenario had placed its own rocks. Keyed by
+// the array, so world.js needs no extra field; a WeakSet lets old maps' lists be collected.
+const handled = new WeakSet();
+
+/** One rock entity per map rock, once per map, and none when rock entities already exist. Returns
+ * the number spawned. Once run for a map it spawns nothing again on it, even after every rock is gone
+ * (rocks destroyed or carried off are never respawned). */
 export function spawnRocks(world) {
+  if (handled.has(world.rocks)) return 0;
+  handled.add(world.rocks);
   if (world.query({ kind: 'rock' }).length) return 0;
   for (const r of world.rocks) {
     world.spawn('rock', {
@@ -30,6 +46,15 @@ export function spawnRocks(world) {
     });
   }
   return world.rocks.length;
+}
+
+/** The rocks that stand in the world now, each with x, y and size: the rock entities once spawnRocks
+ * has run for this map (or a scenario placed its own, which spawnRocks would keep), else the map's
+ * records, which is the window between world.loadMap and the terrain system's next update or pass
+ * (village setup places its start layout in it). Read-only: callers must not edit the list. */
+export function liveRocks(world) {
+  const ents = world.query({ kind: 'rock' });
+  return handled.has(world.rocks) || ents.length ? ents : world.rocks;
 }
 
 const SAMPLES = 30;
