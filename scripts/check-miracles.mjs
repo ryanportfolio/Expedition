@@ -1,6 +1,7 @@
 // Miracles check, node only (no browser). Runs the shared drive from src/miracles/testbed.js on
 // createGame() (orbs, each miracle cast through the hand path, fizzle, respawn, power accounting),
-// then: fire spread is deterministic for a seed, burning stops under rain and stays out, costs and
+// then: fire spread is deterministic for a seed, burning stops under rain and stays out, heal mends
+// houses and trees that lightning and fire left standing (not wrecks), costs and
 // power accounting are exact, the pedestals follow the player temple building (not the map's temple
 // site) at its base height, and the miracles update never touches the DOM.
 //
@@ -207,6 +208,75 @@ function fireRun(seed, { rainAt = null } = {}) {
     const caught = temple.burning > 0;
     t.step(bound);
     assert(caught && temple.hp > 0 && temple.stage === 'done', `a fire cast on the temple scorches it but leaves it standing (caught ${caught}, hp ${temple.hp.toFixed(2)}, ${temple.stage})`);
+  }
+}
+
+// ---- 3d. heal mends what play damages (round 46). Villagers spawn healthy, can't burn and die
+// outright, and the creature is back at full hp every tick, so a paid heal used to change nothing in
+// normal play. Real village, real casts: a lightning bolt on a player house while rain keeps its fire
+// off, and a fire miracle on a tree that rain then puts out, leave both standing and hurt; a paid heal
+// raises both. A burning house is mended but keeps burning; a wreck stays a wreck.
+{
+  const H = TUNING.heal, L = TUNING.lightning, F = TUNING.fire;
+  const villageGame = (seed) => {
+    const game = watch(createGame({ seed }));
+    game.world.loadMap(buildIsland());
+    game.systems.village.setup();
+    const houses = game.world.query({ kind: 'building' }).filter((b) => b.owner === 'player' && b.type === 'house');
+    return { game, houses, M: game.systems.miracles, t: nodeT(game) };
+  };
+  const heal = (game, M, t, x, y) => {
+    game.state.power = 100;
+    const cast = M.cast('heal', x, y);
+    t.step(H.delay + 0.05);
+    return cast && game.state.power === 100 - TUNING.costs.heal;
+  };
+  {
+    const { game, houses, M, t } = villageGame(1);
+    const house = houses[0];
+    M.cast('rain', house.x, house.y, { free: true });
+    M.cast('lightning', house.x, house.y, { free: true });
+    t.step(L.strokes[0] + 0.1);
+    const hit = house.hp;
+    assert(hit < 1 && hit > 0 && !(house.burning > 0) && house.stage === 'done',
+      `lightning in the rain leaves a player house standing and hurt (hp ${hit.toFixed(2)}, burning ${house.burning}, ${house.stage})`);
+    const paid = heal(game, M, t, house.x, house.y);
+    assert(paid && house.hp > hit && house.hp <= 1 && house.stage === 'done',
+      `a paid heal mends the struck house (hp ${hit.toFixed(2)} -> ${house.hp.toFixed(2)}, ${house.stage}, paid ${paid})`);
+  }
+  {
+    const { game, M, t } = villageGame(1);
+    const blds = game.world.query({ kind: 'building' });
+    const clear = (e) => blds.every((b) => Math.hypot(b.x - e.x, b.y - e.y) > 6);
+    const tree = game.world.query({ kind: 'tree' }).filter(clear).sort((a, b) => a.id - b.id)[0];
+    M.cast('fire', tree.x, tree.y, { free: true });
+    t.step(F.igniteDelay + 1.5);
+    M.cast('rain', tree.x, tree.y, { free: true });
+    t.step(TUNING.rain.extinguishTime + 0.5);
+    const hit = tree.hp;
+    assert(game.world.get(tree.id) === tree && hit < 1 && hit > 0 && !(tree.burning > 0),
+      `a fire put out by rain leaves a tree standing and hurt (hp ${hit.toFixed(2)}, burning ${tree.burning})`);
+    heal(game, M, t, tree.x, tree.y);
+    assert(tree.hp > hit && tree.hp <= 1, `heal mends the scorched tree (hp ${hit.toFixed(2)} -> ${tree.hp.toFixed(2)})`);
+  }
+  {
+    const { game, houses, M, t } = villageGame(2);
+    const house = houses[0];
+    M.cast('fire', house.x, house.y, { free: true });
+    t.step(F.igniteDelay + 2);
+    const lit = house.burning, hit = house.hp;
+    heal(game, M, t, house.x, house.y);
+    assert(lit > 0 && house.hp > hit && house.burning > 0,
+      `heal mends a burning house but leaves the fire to rain (hp ${hit.toFixed(2)} -> ${house.hp.toFixed(2)}, burning ${lit.toFixed(2)} -> ${house.burning.toFixed(2)})`);
+  }
+  {
+    const { game, houses, M, t } = villageGame(2);
+    const house = houses[0];
+    M.cast('fire', house.x, house.y, { free: true });
+    t.step(F.igniteDelay + F.burnTime + F.fadeTime + 1);
+    const was = house.stage;
+    heal(game, M, t, house.x, house.y);
+    assert(was === 'wrecked' && house.hp === 0 && house.stage === 'wrecked', `heal leaves a wreck a wreck (${was} -> ${house.stage}, hp ${house.hp})`);
   }
 }
 

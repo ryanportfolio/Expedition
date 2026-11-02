@@ -1,6 +1,6 @@
 // Node check for the hand system (no browser). Builds createGame() without a canvas on the real
 // island, drives it only through input.synth, and checks grab / carry / release / flight / landing,
-// lethal and gentle villager landings, the sea, buildings, thrown pedestal orbs casting on their
+// lethal and gentle villager landings, a cancelled press (blur) that drops instead of throwing, the sea, buildings, thrown pedestal orbs casting on their
 // landing point (and a landed entity already on its contact point), stroke reversal counting, slap, tether,
 // the flight math against the closed form, the lethal threshold edge, that update() and the input
 // handlers never touch the DOM or call Math.random, that every emitted event carries its spec
@@ -247,6 +247,30 @@ section('villagers: hard throw kills, gentle drop does not', () => {
   ok(soft && soft.speed < HAND.lethalSpeed, `gentle drop lands at ${soft?.speed.toFixed(2)}`);
   ok(v2.hp === 0.8 && !f.since(n).some((e) => e.type === 'act' && e.weight === -0.6), 'gently dropped villager keeps its hp, no kill act');
   ok(onTerrain(world, v2) && !v2.airborne, 'dropped villager stands on the terrain');
+});
+
+// Round 46: a window blur, a lost capture or a cancelled pointer ends the press through
+// input.cancel() (scripts/check-engine.mjs checks the DOM side). Before, it was an ordinary release
+// with the speed of the last moves, so alt-tabbing out mid-throw threw the villager to its death.
+section('a cancelled press mid-throw drops the villager, never throws it', () => {
+  const f = setup();
+  const { step, sp, grab, s, game } = f;
+  const v = sp('villager', 20.5, 39.5, { hp: 1, sprite: getSprite('test-figure') });
+  const n = f.log.length;
+  grab(v);
+  // the moves of the hard throw above (flick(1, 0.2, 14)), ended by a cancel instead of a release
+  const k = 14 / HAND.throwGain / Math.hypot(1, 0.2), sv = groundToScreenVelocity(k, 0.2 * k), p = game.input.pointer;
+  for (let i = 0; i < 4; i++) { s.move(p.sx + sv.vsx / 30, p.sy + sv.vsy / 30); step(1 / 30); }
+  const would = releaseVelocity(p.vsx, p.vsy);
+  s.cancel();
+  step(2);
+  const rel = f.since(n).find((e) => e.type === 'release' && e.entityId === v.id);
+  const landed = f.since(n).find((e) => e.type === 'landed' && e.entityId === v.id);
+  const act = f.since(n).find((e) => e.type === 'act' && e.target === 'villager');
+  ok(would.thrown && rel && rel.vx === 0 && rel.vy === 0 && rel.vz === 0,
+    `the cancel releases with no speed (a release here would throw at ${would.speed.toFixed(1)} tiles/s; released at ${rel ? Math.hypot(rel.vx, rel.vy).toFixed(1) : '-'})`);
+  ok(landed && landed.speed < HAND.lethalSpeed && v.hp === 1 && act?.verb === 'drop',
+    `the villager is dropped and lives (landed at ${landed?.speed.toFixed(2)}, hp ${v.hp}, act ${act?.verb})`);
 });
 
 section('lethal threshold edge', () => {

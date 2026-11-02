@@ -128,6 +128,12 @@ export function create(game) {
     events.emit('release', { entityId: obj.id, kind: obj.kind, miracle: obj.miracle, x: obj.x, y: obj.y, z: obj.z, vx, vy, vz, by: 'creature' });
   }
 
+  // The hand catching something the creature threw takes it over at once (round 46). The `held`
+  // test in stepFlights alone missed a press and a release between two ticks: the hand's own
+  // flight started, `held` was false again by the next update, and both flights moved and landed
+  // the same object.
+  events.on('grab', ({ entityId }) => { flights.delete(entityId); });
+
   function stepFlights(dt) {
     const bounds = { w: world.w, h: world.h };
     for (const [id, f] of flights) {

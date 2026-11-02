@@ -4,9 +4,21 @@
 // the harness has exposed it and waits for it to finish.
 //
 // A scenario file is src/dev/scenarios/<name>.js with `export default async function (t, game) {}`.
-const SCENARIOS = import.meta.glob('./scenarios/*.js');
+
+/**
+ * Pass rule for a finished scenario, shared with scripts/browser-check.mjs: no error, at least one
+ * assert and every assert true, at least one screenshot. Round 46: `asserts.every(ok)` passed a
+ * scenario that asserted nothing and took no screenshot, so an empty or stubbed-out scenario
+ * passed the browser gate. Every scenario asserts and takes a screenshot (the harness checks each
+ * screenshot pixel by pixel), so a scenario with neither checked nothing.
+ */
+export function scenarioOk({ error, asserts, shots }) {
+  return !error && asserts.length > 0 && asserts.every((a) => a.ok) && shots.length > 0;
+}
 
 export async function runScenario(game, name, seed = 1) {
+  // Vite expands the glob at build time; it sits in here so node checks can import scenarioOk.
+  const SCENARIOS = import.meta.glob('./scenarios/*.js');
   game.stop();
   const state = { name, seed, done: false, ok: false, asserts: [], logs: [], shots: [], error: null, view: null };
   window.__scenario = state;
@@ -77,7 +89,7 @@ export async function runScenario(game, name, seed = 1) {
     const mod = await load();
     game.renderer.render();
     await mod.default(t, game);
-    state.ok = state.asserts.every((a) => a.ok);
+    state.ok = scenarioOk(state);
   } catch (err) {
     state.error = String(err?.stack || err);
     state.ok = false;

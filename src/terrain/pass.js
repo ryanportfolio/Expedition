@@ -5,10 +5,11 @@ import { WATER_LO, WATER_HI } from './cache.js';
 import { hash32 } from './noise.js';
 
 // 64 x 64 glint phases; most cells never glint. A cell lights for one step out of 64.
+const NEVER = 255; // phase of a cell that never glints
 const GLINT = new Uint8Array(64 * 64);
 for (let i = 0; i < GLINT.length; i++) {
   const h = hash32(i & 63, i >> 6, 977);
-  GLINT[i] = (h & 7) < 3 ? (h >>> 8) & 63 : 255;
+  GLINT[i] = (h & 7) < 3 ? (h >>> 8) & 63 : NEVER;
 }
 const GLINT_RATE = 5; // steps per second of sim time
 
@@ -29,7 +30,13 @@ export function drawTerrain(ctx, cache, time) {
       if (!v) continue;
       if (v >= WATER_LO && v <= WATER_HI) {
         const shade = v - WATER_LO;
-        if (shade >= 1 && shade <= 4 && ((GLINT[grow | (((vx + dx) >> 1) & 63)] + step) & 63) === 0) v += 2;
+        if (shade >= 1 && shade <= 4) {
+          // NEVER is tested before the phase sum: (255 + 1) & 63 === 0, so without it every
+          // never-glint cell (about 5/8 of the sea) lit together at step 1, once every 12.8 s
+          // (round 46).
+          const g = GLINT[grow | (((vx + dx) >> 1) & 63)];
+          if (g !== NEVER && ((g + step) & 63) === 0) v += 2;
+        }
       }
       const c = lut[v];
       if (c) buf[dst + vx] = c;

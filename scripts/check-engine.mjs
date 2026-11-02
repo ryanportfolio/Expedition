@@ -2,7 +2,8 @@
 // events, world model and spatial query, display size math, camera (wheel steps per 100 of delta,
 // middle drag from the press), input, system stubs, one full render of the test map into the view
 // buffer, DOM input through input.attach on a stand-in page (edge pan in the strip right of the
-// canvas, chorded buttons, lost capture and blur), and that fields never cover the villagers on them.
+// canvas, chorded buttons, lost capture and blur, which end a press with no pointer speed; a blur
+// also leaves the window), the scenario pass rule, and that fields never cover the villagers on them.
 //
 //   node scripts/check-engine.mjs
 //
@@ -21,6 +22,7 @@ import { makeTestMap, makeTestLut, makeTestSprite, debugTerrainPass } from '../s
 import * as campfire from 'pixelfx/fx/fire/campfire';
 import { readdirSync } from 'node:fs';
 import { registerPainters } from '../src/art/registry.js';
+import { scenarioOk } from '../src/dev/scenario.js';
 
 let pass = 0;
 const fails = [];
@@ -510,6 +512,65 @@ section('dom-input', () => {
     page.blur();
     ok(input.pointer.buttons === 0 && log.at(-1) === 'up0', `window blur releases a held button (buttons ${input.pointer.buttons}, last event ${log.at(-1)})`);
   }
+
+  // A blur, a lost capture or a cancelled pointer ends a press without a gesture (round 46): the
+  // release carries no pointer speed, so the hand drops what it carries instead of throwing it with
+  // the speed of the last moves. A blur also takes the pointer out of the window, so edge panning
+  // stops. A lost capture keeps the pointer inside: it also fires after every ordinary pointerup.
+  // An ordinary release keeps its speed.
+  {
+    const game = createGame({ seed: 1 });
+    const page = fakePage(game, 1920, 1080);
+    const { input, events, camera } = game;
+    input.now = () => game.clock.time * 1000;
+    const ups = [];
+    events.on('pointer-up', (p) => ups.push(p));
+    camera.centerOn(32, 32, 2);
+    const fling = (end) => {
+      page.move(600, 500);
+      page.press(0, true);
+      for (let i = 1; i <= 4; i++) { page.move(600 + 40 * i, 500); game.clock.run(1, game.tick); }
+      const speed = input.pointer.vsx;
+      end();
+      const inside = input.pointer.inside;
+      page.press(0, false); // the stand-in mouse lets go too
+      return { speed, inside, up: ups.at(-1), n: ups.length };
+    };
+    const still = (u) => u && u.vx === 0 && u.vy === 0 && u.vsx === 0 && u.vsy === 0;
+    const n0 = ups.length;
+    const a = fling(() => page.blur());
+    ok(a.speed > 200 && still(a.up) && a.n === n0 + 1, `blur during a fast drag releases with no speed (pointer ${a.speed.toFixed(0)} px/s before, release vsx ${a.up?.vsx}, vx ${a.up?.vx}, ${a.n - n0} releases)`);
+    ok(!a.inside, `blur takes the pointer out of the window (inside ${a.inside})`);
+    const b = fling(() => page.lostCapture());
+    ok(b.speed > 200 && still(b.up), `lost capture during a fast drag releases with no speed (release vsx ${b.up?.vsx})`);
+    ok(b.inside, 'lost capture leaves the pointer inside');
+    const c = fling(() => {});
+    ok(c.speed > 200 && c.up?.vsx > 200, `an ordinary release keeps the pointer speed (${c.up?.vsx?.toFixed(0)} px/s)`);
+    page.lostCapture(); // what Chrome fires after that pointerup
+    ok(ups.length === c.n, `lost capture after an ordinary release adds no release (${ups.length - c.n})`);
+    // edge pan: mouse resting on the right edge, then the window loses focus
+    page.move(1919, 540);
+    game.clock.run(3, game.tick);
+    const x0 = camera.x;
+    game.clock.run(3, game.tick);
+    const panning = camera.x > x0;
+    page.blur();
+    const x1 = camera.x;
+    game.clock.run(6, game.tick);
+    ok(panning && camera.x === x1, `blur stops edge panning (${panning ? 'panning before' : 'not panning before'}, ${(camera.x - x1).toFixed(1)} px after)`);
+  }
+});
+
+// The scenario pass rule (round 46): an empty scenario passed the browser gate, because
+// `asserts.every(ok)` holds for no asserts. It needs at least one assert, all true, and one screenshot.
+section('scenario pass rule', () => {
+  const yes = { ok: true, msg: 'a' }, no = { ok: false, msg: 'b' }, shot = { name: 's' };
+  ok(!scenarioOk({ error: null, asserts: [], shots: [] }), 'a scenario with no asserts and no screenshot fails');
+  ok(!scenarioOk({ error: null, asserts: [], shots: [shot] }), 'a scenario with no asserts fails');
+  ok(!scenarioOk({ error: null, asserts: [yes], shots: [] }), 'a scenario with no screenshot fails');
+  ok(!scenarioOk({ error: null, asserts: [yes, no], shots: [shot] }), 'a failed assert fails');
+  ok(!scenarioOk({ error: 'Error: x', asserts: [yes], shots: [shot] }), 'a scenario that threw fails');
+  ok(scenarioOk({ error: null, asserts: [yes], shots: [shot] }), 'asserts all true and a screenshot passes');
 });
 
 // Fields are flat footprints: villagers standing on one draw over it (round 42: sorted by its centre,

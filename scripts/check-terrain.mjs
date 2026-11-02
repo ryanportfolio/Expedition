@@ -8,7 +8,8 @@
 // exactly its own for a map with 2 rocks); liveRocks gives the map records only until the rocks
 // are entities, then the entities alone (moved, removed, all gone, a scenario's own rock); the cache rebuilds on map change; the
 // tree, stump and rock painters give non-empty, deterministic sprites anchored at their base;
-// update() touches no DOM; no Math.random in terrain code.
+// water glints one cell at a time, never all at once; update() touches no DOM; no Math.random in
+// terrain code.
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +17,7 @@ import { createGame } from '../src/game.js';
 import { createWorld } from '../src/world/world.js';
 import { buildIsland } from '../src/world/island.js';
 import { worldToScreen } from '../src/world/iso.js';
-import { buildTerrainCache, PART, surfaceHeights } from '../src/terrain/cache.js';
+import { buildTerrainCache, PART, surfaceHeights, WATER_LO } from '../src/terrain/cache.js';
 import { drawTerrain } from '../src/terrain/pass.js';
 import * as terrainSystem from '../src/systems/terrain.js';
 import * as painters from '../src/art/painters/terrain.js';
@@ -366,6 +367,30 @@ function faceCounts(world, cache) {
     ...readdirSync(join(ROOT, 'src/terrain')).map((f) => `src/terrain/${f}`)];
   const bad = files.filter((f) => /Math\.random|document\.|window\./.test(readFileSync(join(ROOT, f), 'utf8').replace(/\/\/.*$/gm, '')));
   ok(bad.length === 0, `no Math.random or DOM access in terrain sources (${bad.join(', ') || 'none'})`);
+}
+
+// Water glint (round 46): a glinting water cell lights for one step in 64 and most cells never
+// glint. The never-glint cells held 255, and (255 + 1) & 63 === 0, so all of them (about 5/8 of the
+// sea) lit together at step 1: a flash across the water every 64 / 5 = 12.8 s. A flat 128 x 64 water
+// buffer covers every one of the 64 x 64 glint cells (each cell is 2 px across). Over one cycle no
+// pixel may light twice, about 3/8 of them light once, and no step lights more than 1/16 of them.
+{
+  const W = 128, H = 64, base = WATER_LO + 2; // shade 2: a shade that glints
+  const cache = { data: new Uint8Array(W * H).fill(base), w: W, h: H, ox: 0, oy: 0 };
+  const lut = new Uint32Array(256);
+  lut[base] = 1; lut[base + 2] = 2; // 2 = a glinting pixel
+  const buf = new Uint32Array(W * H), times = new Uint8Array(W * H), perStep = [];
+  for (let s = 0; s < 64; s++) {
+    buf.fill(0);
+    drawTerrain({ buf, w: W, h: H, camX: 0, camY: 0, lut }, cache, (s + 0.5) / 5); // GLINT_RATE 5 steps/s
+    let n = 0;
+    for (let i = 0; i < buf.length; i++) if (buf[i] === 2) { n++; times[i]++; }
+    perStep.push(n);
+  }
+  const N = W * H, total = perStep.reduce((a, b) => a + b, 0), most = Math.max(...perStep);
+  ok(times.every((t) => t <= 1), `water glint: no pixel lights twice in one 64-step cycle (most ${Math.max(...times)})`);
+  ok(total >= 0.25 * N && total <= 0.5 * N, `water glint: about 3/8 of the water glints once per cycle (${total} of ${N} px)`);
+  ok(most <= N / 16, `water glint: no step lights the sea at once (most in one step ${most} of ${N} px, at step ${perStep.indexOf(most)})`);
 }
 
 console.log(`check-terrain: ${pass} passed, ${fails.length} failed`);

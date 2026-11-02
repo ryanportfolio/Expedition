@@ -11,7 +11,8 @@
 // restored and a removed creature comes back. Haul delivery on a flat map (round 39): a blueprint
 // removed or a woodpile wrecked while the load goes in (no crash, the load is set down), a blueprint
 // one log short of a two-log load (one goes in, one is set down). Rocks: a rock the hand moved is
-// offered only where it lies, and throwing it leaves one rock entity and the map's rock list. Untrained defaults on seeds 13, 21, 4 (harm limits,
+// offered only where it lies, and throwing it leaves one rock entity and the map's rock list; a rock
+// it threw, caught by the hand and let go between ticks, lands once (round 46). Untrained defaults on seeds 13, 21, 4 (harm limits,
 // grain over villagers, temples stand) and training on the same seeds (slapped twice: no harmful act
 // again at hunger 1, and the key was offered to the brain; stroked: eat:villager often). Round 43: a
 // slap mid eat or throw of a villager stops the act and sets the villager down alive, and a stroke at
@@ -492,6 +493,49 @@ function haulCase(dest, load = 2) {
   for (let i = 0; i < 40 * 30 && !thrown; i++) { game.tick(1 / 30); thrown = cs.history.some((r) => r.key === 'throw:rock' && r.phase === 'complete'); }
   check(thrown && world.query({ kind: 'rock' }).length === 1 && world.rocks.length === 1,
     `rocks: throwing it keeps one rock entity and the map's rock list (${thrown ? 'thrown' : 'not thrown'}, ${world.query({ kind: 'rock' }).length} entities, ${world.rocks.length} map rocks)`);
+}
+
+// ---- a rock the creature threw, caught by the hand and let go before the next tick (round 46): it
+// lands once, through the hand. The creature dropped its own flight only when an update saw the
+// rock held, so a press and a release between two ticks left that flight running next to the hand's:
+// the rock landed through the hand, then again through the creature's stale flight.
+{
+  const W = 16;
+  const game = createGame({ seed: 1 });
+  const { world, events, camera } = game;
+  game.display.setDevice(1920, 1080, 1);
+  world.loadMap({ w: W, h: W, height: new Uint8Array(W * W).fill(1), ground: new Uint8Array(W * W).fill(3), rocks: [{ x: 5.5, y: 3.5, size: 1 }], sites: { creatureStart: { x: 3, y: 3 } } });
+  const cs = game.systems.creature, hand = game.systems.hand, s = game.input.synth;
+  cs.setup();
+  game.tick(1 / 30);
+  cs.debug.candidateFilter = (c) => c.key === 'throw:rock';
+  let thrown = null;
+  const landings = [];
+  events.on('release', (p) => { if (p.by === 'creature' && p.kind === 'rock') thrown = p; });
+  events.on('landed', (p) => { if (p.kind === 'rock' && thrown) landings.push(p); });
+  for (let i = 0; i < 40 * 30 && !thrown; i++) game.tick(1 / 30);
+  cs.debug.candidateFilter = () => false; // no second throw
+  const rock = thrown && world.get(thrown.entityId);
+  let caught = false;
+  if (rock) {
+    // catch it low on its way down: the hand looks for things around the ground point under the
+    // pointer, which for a rock high in the air is tiles behind it
+    // (the creature's flight moves the rock but leaves its vx/vy/vz at the launch values, so
+    // "falling" is read from z)
+    let zWas = rock.z;
+    game.tick(1 / 30);
+    for (let i = 0; i < 90 && rock.airborne && !(rock.z < zWas && rock.z - world.heightAt(rock.x, rock.y) < 2.5); i++) { zWas = rock.z; game.tick(1 / 30); }
+    const flying = rock.airborne;
+    camera.centerOn(rock.x, rock.y, rock.z);
+    const v = camera.worldToView(rock.x, rock.y, rock.z);
+    s.move(v.sx, v.sy - 1);
+    s.down(0);
+    caught = flying && hand.state.heldId === rock.id;
+    s.up(0);
+    for (let i = 0; i < 6 * 30; i++) game.tick(1 / 30);
+  }
+  check(rock && caught && landings.length === 1 && landings[0].by === undefined,
+    `rocks: a creature-thrown rock caught and let go between ticks lands once, through the hand (${rock ? `caught ${caught}, ${landings.length} landings: ${landings.map((l) => `${l.by ?? 'hand'} at (${l.x.toFixed(2)}, ${l.y.toFixed(2)})`).join(', ')}` : 'never thrown'})`);
 }
 
 // ---- sources: no Math.random, no DOM in the creature code

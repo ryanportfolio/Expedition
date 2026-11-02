@@ -10,8 +10,10 @@
 // Every screenshot is decoded and checked: each game pixel must show as one solid scale x scale
 // block of device pixels matching the view buffer pixel (no smoothing, no offset), and the image must
 // hold more than 8 colours (blank-image guard).
-// Exit 0 only when the scenario finished, every assert and pixel check passed and the page logged no
-// page error or console error. Chrome and the server are closed on every path.
+// Exit 0 only when the scenario finished, made at least one assert and took at least one screenshot,
+// every assert and pixel check passed and the page logged no page error or console error (round 46:
+// a scenario that asserted nothing and took no screenshot passed). Chrome and the server are closed
+// on every path.
 import fs from 'node:fs';
 import path from 'node:path';
 import { inflateSync } from 'node:zlib';
@@ -212,6 +214,7 @@ async function main() {
     result.shotViews = state.shots;
     result.error = state.error;
     result.ok = state.ok && !state.error && result.failed.length === 0 &&
+      result.asserts.length > 0 && result.shots.length > 0 &&
       result.consoleErrors.length === 0 && result.pageErrors.length === 0 &&
       result.pixelChecks.length === result.shots.length && result.pixelChecks.every((c) => c.ok);
   } catch (err) {
@@ -229,6 +232,8 @@ async function main() {
     `${result.consoleErrors.length} console errors, ${result.pageErrors.length} page errors` +
     (result.view ? `, final view ${result.view.w}x${result.view.h} at zoom ${result.view.zoom}` : ''));
   for (const a of result.failed) console.log(`  FAIL ${a.msg}`);
+  if (!result.error && !result.asserts.length) console.log('  FAIL the scenario made no asserts');
+  if (!result.error && !result.shots.length) console.log('  FAIL the scenario took no screenshot');
   for (const c of result.pixelChecks) if (!c.ok) console.log(`  FAIL pixel check ${c.name}: ${c.summary}`);
   for (const e of [...result.consoleErrors, ...result.pageErrors]) console.log(`  ERROR ${e}`);
   if (result.error) console.log(`  ERROR ${result.error}`);
