@@ -1,0 +1,137 @@
+# Merges Dependabot PRs that only update Playwright packages, once the PR's other checks pass.
+# Owner decision (2026-10-21): Playwright stays on the latest release without a manual review.
+name: Dependabot Playwright auto-merge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  # Runs the PR's dependency code. Read-only token, no persisted git credentials.
+  smoke:
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # fetch-metadata lists the PR commits, which needs this on private repos
+      pull-requests: read
+    outputs:
+      ok: ${{ steps.scope.outputs.ok }}
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@v2
+
+      - name: Only Playwright packages changed
+        id: scope
+        env:
+          NAMES: ${{ steps.meta.outputs.dependency-names }}
+        run: |
+          ok=true
+          IFS=',' read -ra deps <<< "$NAMES"
+          for d in "${deps[@]}"; do
+            d="$(echo "$d" | xargs)"
+            case "$d" in
+              playwright|playwright-core|@playwright/test) ;;
+              *) ok=false; echo "not a Playwright package: $d" ;;
+            esac
+          done
+          [ ${#deps[@]} -gt 0 ] || ok=false
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.scope.outputs.ok == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.ok == 'true'
+        with:
+          node-version: 22
+
+      - name: Install and launch the new Playwright
+        if: steps.scope.outputs.ok == 'true'
+        working-directory: .${{ steps.meta.outputs.directory }}
+        run: |
+          npm ci
+          npx playwright-core install --with-deps chromium
+          node -e "require('playwright-core').chromium.launch().then(async b => { const p = await b.newPage(); await p.setContent('<h1>ok</h1>'); if (await p.textContent('h1') !== 'ok') throw new Error('page check failed'); console.log('chromium', b.version()); await b.close(); })"
+
+  # Holds the write token. Checks out nothing and runs no PR or dependency code.
+  automerge:
+    needs: smoke
+    if: needs.smoke.outputs.ok == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      statuses: read
+    steps:
+      - name: Wait for the PR's other checks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          SELF: ${{ github.job }}
+          # Check runs from this repo's CI that must exist and pass before a merge, space-separated.
+          # Without them an empty check list (CI not registered yet) would count as passed.
+          REQUIRED_CHECKS: "ci"
+          # Commit status contexts that must exist and succeed before a merge, comma-separated.
+          # A status that has not been posted yet counts as pending, so a slow poster cannot be skipped.
+          REQUIRED_STATUSES: ""
+        run: |
+          # Two clean polls in a row, so a check that registers late still gets waited for.
+          clean=0
+          for _ in $(seq 1 80); do
+            runs=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --jq "[.check_runs[] | select(.name != \"$SELF\")]")
+            pending=$(echo "$runs" | jq '[.[] | select(.status != "completed")] | length')
+            for c in $REQUIRED_CHECKS; do
+              if [ "$(echo "$runs" | jq --arg c "$c" '[.[] | select(.name == $c)] | length')" -eq 0 ]; then
+                pending=$((pending + 1))
+              fi
+            done
+            failed=$(echo "$runs" | jq '[.[] | select(.status == "completed" and (.conclusion | IN("success","skipped","neutral") | not))] | length')
+            status=$(gh api "repos/$REPO/commits/$SHA/status?per_page=100")
+            state=$(echo "$status" | jq -r '.state')
+            total=$(echo "$status" | jq '.total_count')
+            missing=$(echo "$status" | jq --arg req "$REQUIRED_STATUSES" '[$req | split(",")[] | sub("^ +"; "") | sub(" +$"; "") | select(. != "")] - [.statuses[] | select(.state == "success") | .context] | length')
+            if [ "$failed" -gt 0 ] || [ "$state" = "failure" ] || [ "$state" = "error" ]; then
+              echo "a check failed; leaving the PR open"; exit 1
+            fi
+            if [ "$pending" -eq 0 ] && [ "$missing" -eq 0 ] && { [ "$total" -eq 0 ] || [ "$state" = "success" ]; }; then
+              clean=$((clean + 1))
+              if [ "$clean" -ge 2 ]; then echo "all other checks passed"; exit 0; fi
+            else
+              clean=0
+            fi
+            sleep 30
+          done
+          echo "checks still pending after 40 minutes; leaving the PR open"; exit 1
+
+      - name: Only Dependabot commits, head unchanged
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # fetch-metadata only checks the first commit; any commit not made and signed by Dependabot needs a person.
+          others=$(gh api --paginate "repos/$REPO/pulls/$PR/commits?per_page=100" --jq '.[] | select(.author.login != "dependabot[bot]" or .commit.verification.verified != true) | .sha')
+          if [ -n "$others" ]; then echo "commits not made by Dependabot: $others"; exit 1; fi
+          last=$(gh api --paginate "repos/$REPO/pulls/$PR/commits?per_page=100" --jq '.[].sha' | tail -n 1)
+          if [ "$last" != "$SHA" ]; then echo "PR head moved since this run started"; exit 1; fi
+
+      - name: Merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        # outside any checkout, so gh deletes only the remote branch
+        working-directory: ${{ runner.temp }}
+        run: gh pr merge --repo "$REPO" --squash --delete-branch --match-head-commit "$SHA" "$PR_URL"

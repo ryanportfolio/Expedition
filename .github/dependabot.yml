@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Playwright only (owner rule: stay on the latest release). Other dependencies are updated by hand.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: daily
+    allow:
+      - dependency-name: "playwright"
+      - dependency-name: "playwright-core"
+      - dependency-name: "@playwright/test"
+    groups:
+      playwright:
+        patterns: ["playwright", "playwright-core", "@playwright/test"]
+    open-pull-requests-limit: 2

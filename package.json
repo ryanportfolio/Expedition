@@ -1,0 +1,21 @@
+{
+  "name": "expedition",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "node scripts/run-checks.mjs",
+    "check:browser": "node scripts/run-browser-checks.mjs",
+    "check:ip": "node scripts/check-ip.mjs"
+  },
+  "dependencies": {
+    "pixelfx": "git+https://github.com/patch-gg/pixelfx.git#a84159688af3ca37a4be05a0d422b94451b2e24e"
+  },
+  "devDependencies": {
+    "playwright-core": "1.64.1",
+    "vite": "^8.3.5"
+  }
+}
