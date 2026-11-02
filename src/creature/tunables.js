@@ -33,7 +33,7 @@ export const CREATURE = {
     'idle:none': {},
     'wander:none': { boredom: 0.1 },
   },
-  grainBite: 3, // grain taken from a storehouse per meal
+  grainBite: 60, // grain taken from a storehouse per meal
   waterGrowth: 0.3, // field growth added by one watering
   smashDamage: 0.5, // building hp removed by one smash (a temple never goes below VILLAGE.templeMinHp)
   // Untrained restraint, the slice's design default: training decides once the player trains it.
@@ -44,7 +44,7 @@ export const CREATURE = {
   // forbids it through the brain as before. A debug candidateFilter sees every candidate.
   harm: { 'eat:villager': 'villager', 'throw:villager': 'villager', 'smash:building': 'building' },
   harmCooldown: { villager: 160, building: 120 },
-  fellWood: 2, // wood one felled tree yields when the creature hauls it (as a village woodcutter's chop: VILLAGE.treeYield)
+  pileHaul: 50, // wood the creature takes from a woodpile per haul (a felled tree yields its woodIn, as a woodcutter's chop)
   gutPerMeal: 1, // poop is offered once the gut holds at least 1
   dungTime: 60, // seconds a dung item fertilizes before it is used up
   dungRadius: 4, // it boosts the nearest field within this many tiles

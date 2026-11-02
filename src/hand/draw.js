@@ -4,6 +4,8 @@
 import { getSprite } from '../art/registry.js';
 import { idx } from '../art/palette.js';
 import { makeLut } from '../art/lut.js';
+import { drawText } from '../ui/draw.js';
+import { HAND } from './tunables.js';
 
 const SHADOWS = ['shadow-s', 'shadow-m', 'shadow-l'];
 const RING = [[-1, 0], [1, 0], [0, -1], [0, 1]];
@@ -85,14 +87,28 @@ export function outlineItem(e, ramp, shade) {
 }
 
 /**
- * Screen overlay drawn after the world and effects: the carried object again (so nothing in front
- * of it in the world hides what is in the hand), then the hand sprite for the current pose.
+ * Screen overlay drawn after the world and effects: the carried objects again, back to front (so
+ * nothing in front of them in the world hides what is in the hand), then the hand sprite for the
+ * current pose, then `tag` ({ text, icon } or null): the amount carried, to the hand's right, with
+ * the resource's item sprite before it when `icon` names one.
  */
-export function drawTop(ctx, hand, held) {
-  if (held?.sprite) {
-    const v = ctx.toView(held.x, held.y, held.z);
-    blitOpaque(ctx, held.sprite, v.vx, v.vy, held.lut ?? ctx.lut, !!held.flipX);
+export function drawTop(ctx, hand, held, tag = null) {
+  const list = (Array.isArray(held) ? held : held ? [held] : []).filter((e) => e.sprite);
+  list.sort((a, b) => a.x + a.y - (b.x + b.y) || (a.z ?? 0) - (b.z ?? 0));
+  for (const e of list) {
+    const v = ctx.toView(e.x, e.y, e.z);
+    blitOpaque(ctx, e.sprite, v.vx, v.vy, e.lut ?? ctx.lut, !!e.flipX);
   }
   const v = ctx.toView(hand.x, hand.y, hand.z);
-  blitOpaque(ctx, getSprite(hand.pose), v.vx, v.vy, handLut(ctx.lut));
+  const sprite = getSprite(hand.pose);
+  blitOpaque(ctx, sprite, v.vx, v.vy, handLut(ctx.lut));
+  if (!tag) return;
+  let x = v.vx - sprite.ax + sprite.w + HAND.labelGap;
+  const y = v.vy - sprite.ay + Math.floor(sprite.h / 2) - 3;
+  if (tag.icon) {
+    const ic = getSprite(tag.icon);
+    blitOpaque(ctx, ic, x + ic.ax, y + 5, ctx.lut);
+    x += ic.w + 1;
+  }
+  drawText(ctx, tag.text, x, y, colorOf(ctx, 'ui-parchment', 7), { outline: colorOf(ctx, 'ui-ink', 0) });
 }

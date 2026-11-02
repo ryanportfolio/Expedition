@@ -27,6 +27,7 @@ const { buildIsland } = await import('../src/world/island.js');
 const { HAND } = await import('../src/systems/hand.js');
 const { stepBody, apexHeight, flatRange, predictLanding } = await import('../src/hand/flight.js');
 const { createStrokeTracker } = await import('../src/hand/stroke.js');
+const { VILLAGE, woodIn } = await import('../src/village/config.js');
 const { releaseVelocity, groundToScreenVelocity, screenToGroundVelocity, isGrabbable } = await import('../src/hand/tunables.js');
 
 let failed = 0, passed = 0;
@@ -355,16 +356,21 @@ section('rock thrown into a building damages it', () => {
 
 section('trees uproot, orbs carry their miracle', () => {
   const f = setup();
-  const { sp, grab, s, step, game } = f;
+  const { sp, grab, s, step, game, moveTo, middle } = f;
   const tree = sp('tree', 22.5, 38.5, { sprite: getSprite('test-tree') });
+  // a press on a tree that moves pulls it up; one held still draws its wood (bulk section)
+  const pull = (e) => { const q = middle(e); moveTo(q); s.down(0); s.move(q.sx + 4, q.sy); step(0.2); };
   let n = f.log.length;
-  grab(tree, 0.2);
+  s.move(0, 0);
+  moveTo(middle(tree)); s.down(0); step(HAND.treeDrawDelay / 2); s.up(0); step(1 / 30);
+  ok(!tree.held && !tree.uprooted && f.since(n).length === 0, 'a short click on a tree does nothing');
+  pull(tree);
   const up = f.since(n).find((e) => e.type === 'act' && e.verb === 'uproot');
   ok(up && up.target === 'tree' && up.actor === 'player' && typeof up.weight === 'number', `grabbing a tree uproots it: ${JSON.stringify(up)}`);
   ok(tree.uprooted === true, 'tree marked uprooted');
   s.up(0);
   step(1);
-  grab(tree, 0.2);
+  pull(tree);
   ok(f.since(n).filter((e) => e.type === 'act' && e.verb === 'uproot').length === 1, 'a tree uproots once');
   s.up(0);
   step(1);
@@ -568,6 +574,146 @@ section('game.state.uiCapture blocks new grabs, strokes, slaps and tethers, neve
   s.down(2); s.up(2);
   ok(game.state.selectedCreature === c.id && seen(n, 'tether').length === 0, 'captured: a right click on the ground sends no tether');
   game.state.uiCapture = null; // hand it back to the ui system
+});
+
+// The hand in bulk on the real island with both villages set up: draw grain from a field and drop
+// it on the storehouse; draw a standing tree's wood; take wood out of the woodpile, drop some on a
+// blueprint and pour the rest in (god-building at godBuildFactor x the cost); multi pick-up of
+// villagers (stowed, one out per click, the rest poured out) and of trees (dropped on the woodpile
+// at once); never two rocks; shaking empties the hand.
+section('the hand in bulk', () => {
+  const f = setup();
+  const { game, world, camera, s, step, sp, middle, moveTo } = f;
+  const vs = game.systems.village;
+  vs.setup();
+  const hs = game.systems.hand, H = hs.state;
+  const own = (type) => world.query({ kind: 'building' }).find((b) => b.owner === 'player' && b.type === type && b.stage === 'done');
+  const at = (x, y) => { const v = camera.worldToView(x, y, world.heightAt(x, y)); return { sx: v.sx, sy: v.sy }; };
+  const over = (b) => at(b.x, b.y);
+  const field = own('field'), store = own('storehouse'), pile = own('woodpile');
+  camera.centerOn(store.x, store.y, world.heightAt(store.x, store.y));
+  step(1 / 30);
+  const seen = { shake: [], pour: [] };
+  game.events.on('shake', (e) => seen.shake.push(e));
+  game.events.on('pour', (e) => seen.pour.push(e));
+
+  // grain: hold on a ripe field, carry to the storehouse, let go
+  field.growth = 1;
+  moveTo(over(field)); s.down(0); step(0.4);
+  const early = H.load?.amount ?? 0;
+  step(0.4);
+  const grain = H.load;
+  ok(grain && grain.kind === 'grain' && grain.amount > early && early > 0, `holding on a field draws grain, more the longer it is held (${early} after 0.4 s, ${grain?.amount} after 0.8 s)`);
+  // the field keeps growing while it is drawn from (by under 0.04 in 0.8 s, tended)
+  ok(grain && field.growth >= 1 - grain.amount / VILLAGE.fieldYield && field.growth < 1 - grain.amount / VILLAGE.fieldYield + 0.04, `the field's crop falls by what was drawn (growth ${field.growth.toFixed(3)} after ${grain?.amount} drawn)`);
+  const g0 = store.grain;
+  moveTo(over(store)); step(0.2);
+  ok(H.load?.amount === grain?.amount, 'passing over the storehouse with a field\'s grain takes none out of it');
+  s.up(0); step(1 / 30);
+  ok(store.grain === g0 + grain.amount && !H.held.length && !world.query({ kind: 'grain' }).some((e) => e.madeBy === 'hand'),
+    `dropped on the storehouse, the grain goes into stock (${g0} -> ${store.grain})`);
+
+  // a standing tree held still: its wood drains into the hand and the tree is gone when empty
+  const tree = world.query({ kind: 'tree' }).filter((t) => !t.held).sort((a, b) => Math.hypot(a.x - store.x, a.y - store.y) - Math.hypot(b.x - store.x, b.y - store.y))[0];
+  const want = woodIn(tree);
+  let n = f.log.length;
+  moveTo(middle(tree)); s.down(0);
+  for (let i = 0; i < 200 && world.get(tree.id); i++) step(1 / 30);
+  ok(!world.get(tree.id) && H.load?.kind === 'wood' && H.load.amount === want && !tree.held,
+    `a press held still on a tree draws its ${want} wood and the tree is gone (hand ${H.load?.amount})`);
+  ok(f.since(n).some((e) => e.type === 'act' && e.verb === 'uproot'), 'draining a tree uproots it (act)');
+  const w0 = pile.wood;
+  moveTo(over(pile)); step(0.2); s.up(0); step(1 / 30);
+  ok(pile.wood === w0 + want && !H.held.length, `the wood dropped on the woodpile goes into stock (${w0} -> ${pile.wood})`);
+
+  // the woodpile: take wood out, drop part on a blueprint, pour the rest in
+  pile.wood = 5000;
+  const spot = (() => {
+    for (let r = 3; r < 9; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      const tx = Math.floor(store.x) + dx, ty = Math.floor(store.y) + dy;
+      if (vs.validate('house', tx, ty).ok) return [tx, ty];
+    }
+    return null;
+  })();
+  const site = world.get(vs.placeBlueprint('house', spot[0], spot[1]));
+  const cost = site.woodCost;
+  moveTo(over(pile)); s.down(0);
+  for (let i = 0; i < 300 && (H.load?.amount ?? 0) < 100; i++) step(1 / 30);
+  const taken = H.load?.amount ?? 0;
+  ok(taken >= 100 && pile.wood === 5000 - taken, `holding on the woodpile takes wood out (${taken}, pile ${pile.wood})`);
+  moveTo(over(site)); step(HAND.pourDelay / 2); s.up(0); step(1 / 30);
+  ok(site.woodHave === Math.min(cost, taken) && site.stage === 'blueprint' && site.progress === 0, `dropped on a blueprint, the wood pays in at cost (woodHave ${site.woodHave} of ${cost})`);
+  const before = { have: site.woodHave, god: vs.stats().player.godWood };
+  moveTo(over(pile)); s.down(0);
+  for (let i = 0; i < 400 && (H.load?.amount ?? 0) < 2 * cost; i++) step(1 / 30);
+  moveTo(over(site));
+  step(HAND.pourDelay / 2);
+  ok(site.woodHave === before.have && !seen.pour.length, 'passing over a site does not pour (the hand must stay over it)');
+  const carried = H.load?.amount ?? 0;
+  for (let i = 0; i < 300 && site.stage !== 'done'; i++) step(1 / 30);
+  const god = vs.stats().player.godWood - before.god;
+  const left = H.load?.amount ?? 0;
+  ok(site.stage === 'done' && seen.pour.length > 0, `held over the blueprint, the wood pours in and god-builds it (${site.stage})`);
+  const expect = (cost - before.have) + cost * (VILLAGE.godBuildFactor - 1);
+  ok(Math.abs(god - expect) <= 1 && carried - left === god, `god-building used ${god} wood for the ${cost - before.have} the site still lacked (expected ${expect}: more than builders use); the hand kept ${left}`);
+  s.up(0); step(1 / 30);
+  if (H.held.length) hs.shake();
+
+  // multi pick-up: villagers swept up, stowed, put out one per click, the rest poured out
+  const fig = getSprite('test-figure');
+  const vx = store.x + 3, vy = store.y + 3;
+  const group = [0, 1, 2].map((i) => sp('villager', vx + i * 0.8, vy, { hp: 1, sprite: fig, grabbable: true, owner: 'player' }));
+  step(1 / 30);
+  for (const v of group) world.move(v, vx + group.indexOf(v) * 0.8, vy, world.heightAt(vx + group.indexOf(v) * 0.8, vy));
+  moveTo(middle(group[0])); s.down(0); step(1 / 30);
+  for (const v of group.slice(1)) { moveTo(middle(v)); step(1 / 30); }
+  ok(H.held.length === 3 && group.every((v) => v.held), `sweeping across villagers holds all three (${H.held.length})`);
+  s.up(0); step(1 / 30);
+  ok(H.stowed && H.held.length === 3, 'a group stays in the hand when the button is let go');
+  moveTo(at(vx, vy + 2)); s.down(0); s.up(0); step(1 / 30);
+  ok(H.held.length === 2 && group.filter((v) => !v.held).length === 1, `a click puts one out (${H.held.length} left)`);
+  s.down(0);
+  for (let i = 0; i < 30 && H.held.length; i++) step(1 / 30);
+  s.up(0); step(1 / 30);
+  ok(!H.held.length && !H.stowed && group.every((v) => !v.held), 'holding the button pours the rest out');
+
+  // multi pick-up of trees, let go over the woodpile: all their wood goes in at once
+  const trees = [0, 1, 2].map((i) => sp('tree', store.x - 3 + i * 0.9, store.y - 3, { sprite: getSprite('test-tree'), species: 'broad', growth: 1, grabbable: true }));
+  step(1 / 30);
+  const woods = trees.reduce((a, t) => a + woodIn(t), 0);
+  const p0 = pile.wood;
+  const q0 = middle(trees[0]);
+  moveTo(q0); s.down(0); s.move(q0.sx + 4, q0.sy); step(1 / 30);
+  for (const t of trees.slice(1)) { moveTo(middle(t)); step(1 / 30); }
+  ok(H.held.length === 3 && H.load?.amount === woods, `sweeping across trees holds three with ${woods} wood (${H.held.length}, ${H.load?.amount})`);
+  moveTo(over(pile)); step(0.3); s.up(0); step(1 / 30);
+  ok(pile.wood === p0 + woods && trees.every((t) => !world.get(t.id)) && !H.held.length, `trees let go over the woodpile go in together (${p0} -> ${pile.wood}, want +${woods}; left ${trees.filter((t) => world.get(t.id)).length}, held ${H.held.length})`);
+
+  // never rocks: a second rock is not swept up. Villagers are made ungrabbable meanwhile, so one
+  // walking past is not picked in front of a rock.
+  const people = world.query({ kind: 'villager' });
+  for (const v of people) v.grabbable = false;
+  const rocks = [0, 1].map((i) => sp('rock', vx + i * 0.8, vy + 1.5, { sprite: getSprite('test-sphere', { ramp: 'rock', r: 3 }) }));
+  moveTo(middle(rocks[0])); s.down(0); step(1 / 30);
+  moveTo(middle(rocks[1])); step(1 / 30);
+  ok(H.held.length === 1 && !rocks[1].held, `rocks are never swept up together (${H.held.length}: ${H.held.map((id) => world.get(id)?.kind)})`);
+  s.up(0); step(1);
+
+  // shake: fast side-to-side while holding empties the hand
+  const v2 = rocks[1];
+  moveTo(middle(v2)); s.down(0); step(1 / 30);
+  ok(H.heldId === v2.id, `holding a rock before the shake (${H.held.map((id) => world.get(id)?.kind)})`);
+  const p = game.input.pointer;
+  for (let i = 0; i < 12 && H.held.length; i++) { s.move(p.sx + (i % 2 ? -40 : 40), p.sy); step(1 / 30); }
+  ok(!H.held.length && seen.shake.length === 1 && !v2.held, `shaking empties the hand (${seen.shake.length} shake)`);
+  s.up(0); step(1 / 30);
+  ok(!H.held.length, 'letting go after a shake drops nothing more');
+  // Escape empties it too
+  moveTo(middle(rocks[0])); s.down(0); step(1 / 30);
+  s.keyDown('Escape'); s.keyUp('Escape'); step(1 / 30);
+  ok(!H.held.length && seen.shake.length === 2, 'Escape empties the hand');
+  s.up(0); step(1 / 30);
+  for (const v of people) v.grabbable = true;
 });
 
 section('update and input handlers never touch the DOM or Math.random', () => {

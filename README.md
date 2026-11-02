@@ -17,10 +17,14 @@ Open the address Vite prints. The game starts on the title screen; click or pres
 
 ## Controls
 
-- Drag with the left button to grab something and carry it. Let go while the mouse is still to drop it, or while it is moving to throw it.
+- Drag with the left button to grab something and carry it. Let go while the mouse is still to drop it, or while it is moving to throw it. Dragging a tree pulls it up by the roots.
+- Hold the left button on one of your fields to gather its grain, on your storehouse to take grain out, or on your woodpile to take wood out. Hold it still on a tree to draw out the tree's wood until the tree is gone. The longer you hold, the faster it comes, and the hand shows how much it carries. Keep the button down and move over more fields or trees to gather from them too.
+- Drop grain on your storehouse, or wood or a tree on your woodpile, to add it to the stock. Drop wood or a tree on a building plan to pay that much wood into it. Hold wood over a building plan to pour it in: the building rises as fast as the wood pours, but it takes half as much wood again as your builders would use.
+- With the left button held, sweep across villagers or trees to pick up several at once (never rocks). When you let go they stay in your hand: click to put them down one at a time, or hold the button to let them out as you move. Trees let go over your woodpile or a building plan all go in at once.
+- Shake the hand quickly from side to side, or press Esc, to drop everything it holds. A miracle orb shaken out is cancelled without casting, and a new one appears on its pedestal a few seconds later.
 - Move back and forth over the creature with the left button held to stroke it.
 - Right-click the creature to slap it.
-- Click the creature, then right-click the ground to send it there. Esc cancels the selection.
+- Click the creature, then right-click the ground to send it there. Esc cancels the selection when the hand is empty.
 - Take a miracle orb (rain, fire, heal or lightning) from its pedestal at your temple and drop or throw it to cast that miracle. Each cast costs worship power.
 - Press a number key from 1 to 4, or click an icon on the build bar, to pick a building, then click the ground to place it. Right-click or Esc cancels.
 - Scroll the mouse wheel to zoom. Pan with WASD, the arrow keys, the middle button or by moving the mouse to the edge of the window.
