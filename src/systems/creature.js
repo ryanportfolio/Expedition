@@ -186,6 +186,18 @@ export function create(game) {
     const all = world.query({ kind: 'building' }).filter(byTether);
     return { sites: all.filter(needsWood), piles: all.filter(playerPile) };
   }
+  /** Where a load picked up from `fromId` goes: the nearest reachable site that needs wood, else the
+   * nearest other woodpile. { b, g } with the path goal, or null. */
+  function haulDest(f, fromId) {
+    const { sites, piles: all } = haulDests();
+    const piles = all.filter((b) => b.id !== fromId);
+    let dest = null, bd = Infinity;
+    for (const b of sites.length ? sites : piles) {
+      const g = paths.goalNear(f, b.x, b.y, T.reach);
+      if (g >= 0 && f.dist[g] < bd) { bd = f.dist[g]; dest = { b, g }; }
+    }
+    return dest;
+  }
 
   /** One candidate per verb:target key: the reachable target with the shortest path. */
   function candidates(f, cx, cy, R) {
@@ -368,7 +380,10 @@ export function create(game) {
     }
     if (verb === 'haul' && act.stage === 0) {
       if (o.kind === 'building') {
-        const n = Math.min(o.wood, T.pileHaul);
+        // no more than the site it will carry to still lacks, so no surplus is left on the ground
+        const dest = haulDest(paths.field(tileOf(entity)), o.id)?.b;
+        const need = dest && needsWood(dest) ? dest.woodCost - (dest.woodHave ?? 0) : Infinity;
+        const n = Math.min(o.wood, T.pileHaul, need);
         o.wood -= n;
         const vill = game.systems.village?.sim?.village?.(o.owner);
         if (vill) vill.woodSpent += n;
@@ -444,14 +459,8 @@ export function create(game) {
       case 'haul': {
         if (act.stage === 0) {
           // picked up: carry it to a blueprint that needs wood, else a woodpile
-          const { sites, piles: all } = haulDests();
-          const piles = all.filter((b) => b.id !== act.c.target.id);
           const f = paths.field(tileOf(entity));
-          let dest = null, bd = Infinity;
-          for (const b of sites.length ? sites : piles) {
-            const g = paths.goalNear(f, b.x, b.y, T.reach);
-            if (g >= 0 && f.dist[g] < bd) { bd = f.dist[g]; dest = { b, g }; }
-          }
+          const dest = haulDest(f, act.c.target.id);
           if (!dest) return abort('no-dest');
           act.stage = 1; act.dest = dest.b.id; act.phase = 'walk';
           act.path = paths.pathTo(f, dest.g) ?? []; act.pi = 0;

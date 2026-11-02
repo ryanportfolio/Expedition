@@ -331,13 +331,14 @@ export function create(game) {
     grab(world.spawn(kind, { x: hand.x, y: hand.y, z, vx: 0, vy: 0, vz: 0, amount: got, grabbable: true, carriedBy: null, madeBy: 'hand', sprite }));
   }
 
-  /** Takes up to n wood out of a standing tree; a tree drawn empty is gone (uprooted). */
+  /** Takes up to n wood out of a tree; a tree drawn empty is gone (uprooted, unless it already was). */
   function drainTree(tr, n) {
     const left = woodIn(tr), got = Math.min(n, left);
     tr.wood = left - got;
     if (tr.wood <= 0) {
       removeTree(world, tr);
-      act('uproot', 'tree', HAND.weights.uproot, tr.x, tr.y);
+      // a tree pulled up earlier (grab()) already counted its uproot
+      if (!tr.uprooted) act('uproot', 'tree', HAND.weights.uproot, tr.x, tr.y);
     }
     return got;
   }

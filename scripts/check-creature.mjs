@@ -469,6 +469,19 @@ function haulCase(dest, load = 2) {
   check(h.onGround(w) && w.amount === 1 && Math.hypot(w.x - e.x, w.y - e.y) < 1e-6,
     `haul: the surplus log stays a wood item at the creature's feet (${w ? `${w.amount} logs, on the ground ${h.onGround(w)}, ${Math.hypot(w.x - e.x, w.y - e.y).toFixed(2)} from it` : 'gone'})`);
 }
+// A haul out of a woodpile takes no more than the blueprint it goes to still lacks: 3 of the pile's
+// 100 for a site 3 short, so the pile keeps the rest and no surplus is left on the ground. The site
+// sits within senseRadius of the creature: a woodpile haul is offered only while a site is in range.
+{
+  const h = haulCase({ type: 'house', stage: 'blueprint', woodCost: 10, woodHave: 7, x: 9, y: 9, tx: 8, ty: 8 });
+  h.world.remove(h.wood.id);
+  const pile = h.world.spawn('building', { x: 8, y: 4, vx: 0, vy: 0, vz: 0, tx: 7, ty: 3, fw: 2, fh: 2, owner: 'player', hp: 1, burning: 0, flammable: false, grabbable: false, type: 'woodpile', stage: 'done', wood: 100, grain: 0 });
+  h.cs.debug.candidateFilter = (c) => c.key === 'haul:wood' && c.target?.id === pile.id;
+  const done = h.run(() => h.last()?.phase === 'complete');
+  const loose = h.world.query({ kind: 'wood' });
+  check(done && h.b.woodHave === 10 && pile.wood === 97 && loose.length === 0,
+    `haul: from a woodpile the creature takes only what the site lacks (site ${h.b.woodHave} of ${h.b.woodCost}, pile ${pile.wood} of 100, ${loose.reduce((s, w) => s + (w.amount ?? 1), 0)} logs left on the ground)`);
+}
 
 // ---- rocks (round 39): once the terrain system has made rock entities for a map, the creature
 // senses only those. A rock the hand moved is offered where it lies now, never again at the map's

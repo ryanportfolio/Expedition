@@ -4,7 +4,7 @@
 import { getSprite } from '../art/registry.js';
 import { idx } from '../art/palette.js';
 import { makeLut } from '../art/lut.js';
-import { drawText } from '../ui/draw.js';
+import { drawText, measure } from '../ui/draw.js';
 import { HAND } from './tunables.js';
 
 const SHADOWS = ['shadow-s', 'shadow-m', 'shadow-l'];
@@ -89,8 +89,9 @@ export function outlineItem(e, ramp, shade) {
 /**
  * Screen overlay drawn after the world and effects: the carried objects again, back to front (so
  * nothing in front of them in the world hides what is in the hand), then the hand sprite for the
- * current pose, then `tag` ({ text, icon } or null): the amount carried, to the hand's right, with
- * the resource's item sprite before it when `icon` names one.
+ * current pose, then `tag` ({ text, icon } or null): the amount carried, to the hand's right (its left
+ * when it would run past the view's right edge), with the resource's item sprite before it when
+ * `icon` names one.
  */
 export function drawTop(ctx, hand, held, tag = null) {
   const list = (Array.isArray(held) ? held : held ? [held] : []).filter((e) => e.sprite);
@@ -103,10 +104,15 @@ export function drawTop(ctx, hand, held, tag = null) {
   const sprite = getSprite(hand.pose);
   blitOpaque(ctx, sprite, v.vx, v.vy, handLut(ctx.lut));
   if (!tag) return;
-  let x = v.vx - sprite.ax + sprite.w + HAND.labelGap;
+  const ic = tag.icon ? getSprite(tag.icon) : null;
+  // 1 px more on each side for the text outline
+  const width = (ic ? ic.w + 1 : 0) + measure(tag.text) + 1;
+  const left = v.vx - sprite.ax;
+  let x = left + sprite.w + HAND.labelGap;
+  // near the right edge of the view the label goes on the hand's left instead
+  if (x + width > ctx.w) x = left - HAND.labelGap - width;
   const y = v.vy - sprite.ay + Math.floor(sprite.h / 2) - 3;
-  if (tag.icon) {
-    const ic = getSprite(tag.icon);
+  if (ic) {
     blitOpaque(ctx, ic, x + ic.ax, y + 5, ctx.lut);
     x += ic.w + 1;
   }

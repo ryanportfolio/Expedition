@@ -29,6 +29,8 @@ const { stepBody, apexHeight, flatRange, predictLanding } = await import('../src
 const { createStrokeTracker } = await import('../src/hand/stroke.js');
 const { VILLAGE, woodIn } = await import('../src/village/config.js');
 const { releaseVelocity, groundToScreenVelocity, screenToGroundVelocity, isGrabbable } = await import('../src/hand/tunables.js');
+const { drawTop } = await import('../src/hand/draw.js');
+const { makeLut } = await import('../src/art/lut.js');
 
 let failed = 0, passed = 0;
 const ok = (cond, msg) => {
@@ -630,6 +632,15 @@ section('the hand in bulk', () => {
   const w0 = pile.wood;
   moveTo(over(pile)); step(0.2); s.up(0); step(1 / 30);
   ok(pile.wood === w0 + want && !H.held.length, `the wood dropped on the woodpile goes into stock (${w0} -> ${pile.wood})`);
+  // a tree already pulled up (grab() counted its uproot) and drained: no second uproot act
+  const lying = world.query({ kind: 'tree' }).filter((t) => !t.held).sort((a, b) => Math.hypot(a.x - store.x, a.y - store.y) - Math.hypot(b.x - store.x, b.y - store.y))[0];
+  lying.uprooted = true;
+  n = f.log.length;
+  moveTo(middle(lying)); s.down(0);
+  for (let i = 0; i < 200 && world.get(lying.id); i++) step(1 / 30);
+  ok(!world.get(lying.id) && H.load?.kind === 'wood', `a press held still on an uprooted tree drains it (hand ${H.load?.amount})`);
+  ok(!f.since(n).some((e) => e.type === 'act' && e.verb === 'uproot'), 'draining a tree that was already uprooted acts no second uproot');
+  moveTo(over(pile)); step(0.2); s.up(0); step(1 / 30);
 
   // the woodpile: take wood out, drop part on a blueprint, pour the rest in
   pile.wood = 5000;
@@ -778,6 +789,29 @@ section('the hand in bulk', () => {
     ok(game.systems.miracles.orbs.orbOn('rain') !== null && !casts.length, 'its pedestal has a new orb a few seconds later');
   }
   for (const v of people) v.grabbable = true;
+});
+
+// The amount label stays on screen: drawn with and without a tag, the pixels that differ are the
+// label's. Near the right edge of the view it moves to the hand's left, whole and clear of the hand.
+section('the amount label stays in view', () => {
+  const W = 160, H = 90, lut = makeLut(0);
+  const hand = { x: 0, y: 0, z: 0, pose: 'hand-hold' }, tag = { text: '1234', icon: 'wood' };
+  const sprite = getSprite(hand.pose);
+  /** Columns of the label's pixels with the hand at view x vx. */
+  const labelCols = (vx) => {
+    const frame = (t) => {
+      const ctx = { w: W, h: H, buf: new Uint32Array(W * H), lut, toView: () => ({ vx, vy: 45 }) };
+      drawTop(ctx, hand, [], t);
+      return ctx.buf;
+    };
+    const a = frame(null), b = frame(tag), cols = [];
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) cols.push(i % W);
+    return cols;
+  };
+  const mid = labelCols(60), edge = labelCols(W - 4);
+  ok(mid.length > 0 && Math.min(...mid) > 60 - sprite.ax, `in the middle of the view the label is drawn right of the hand (${mid.length} px)`);
+  ok(edge.length === mid.length, `at the right edge the whole label is drawn (${edge.length} of ${mid.length} px)`);
+  ok(edge.length > 0 && Math.max(...edge) < W - 4 - sprite.ax, `at the right edge the label is left of the hand (rightmost column ${Math.max(...edge)}, hand from ${W - 4 - sprite.ax})`);
 });
 
 section('update and input handlers never touch the DOM or Math.random', () => {
