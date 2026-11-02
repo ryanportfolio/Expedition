@@ -105,7 +105,7 @@ export function drawTop(ctx, hand, held, tag = null) {
   blitOpaque(ctx, sprite, v.vx, v.vy, handLut(ctx.lut));
   if (!tag) return;
   const ic = tag.icon ? getSprite(tag.icon) : null;
-  // 1 px more on each side for the text outline
+  // + 1 for the text outline's right column (its left column is the 1 px gap after the icon, or just outside the label)
   const width = (ic ? ic.w + 1 : 0) + measure(tag.text) + 1;
   const left = v.vx - sprite.ax;
   let x = left + sprite.w + HAND.labelGap;

@@ -380,9 +380,11 @@ export function create(game) {
     }
     if (verb === 'haul' && act.stage === 0) {
       if (o.kind === 'building') {
-        // no more than the site it will carry to still lacks, so no surplus is left on the ground
+        // no more than the site it will carry to still lacks, so no surplus is left on the ground; with
+        // nowhere reachable to carry it (a site behind water), the pile is left alone
         const dest = haulDest(paths.field(tileOf(entity)), o.id)?.b;
-        const need = dest && needsWood(dest) ? dest.woodCost - (dest.woodHave ?? 0) : Infinity;
+        if (!dest) return abort('no-dest');
+        const need = needsWood(dest) ? dest.woodCost - (dest.woodHave ?? 0) : Infinity;
         const n = Math.min(o.wood, T.pileHaul, need);
         o.wood -= n;
         const vill = game.systems.village?.sim?.village?.(o.owner);

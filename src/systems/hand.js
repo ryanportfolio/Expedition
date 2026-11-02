@@ -337,7 +337,8 @@ export function create(game) {
     tr.wood = left - got;
     if (tr.wood <= 0) {
       removeTree(world, tr);
-      // a tree pulled up earlier (grab()) already counted its uproot
+      // a tree pulled up earlier is not the player's uproot again: grab() counted it, and a tree the
+      // creature threw was never the player's
       if (!tr.uprooted) act('uproot', 'tree', HAND.weights.uproot, tr.x, tr.y);
     }
     return got;

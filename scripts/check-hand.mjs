@@ -632,14 +632,19 @@ section('the hand in bulk', () => {
   const w0 = pile.wood;
   moveTo(over(pile)); step(0.2); s.up(0); step(1 / 30);
   ok(pile.wood === w0 + want && !H.held.length, `the wood dropped on the woodpile goes into stock (${w0} -> ${pile.wood})`);
-  // a tree already pulled up (grab() counted its uproot) and drained: no second uproot act
+  // a tree pulled up, set down, then drained: one uproot act in all (grab() counts it, the drain not again)
   const lying = world.query({ kind: 'tree' }).filter((t) => !t.held).sort((a, b) => Math.hypot(a.x - store.x, a.y - store.y) - Math.hypot(b.x - store.x, b.y - store.y))[0];
-  lying.uprooted = true;
   n = f.log.length;
+  const lq = middle(lying);
+  moveTo(lq); s.down(0); s.move(lq.sx + 4, lq.sy); step(0.2);
+  const pulled = lying.held && lying.uprooted;
+  for (let i = 0; i < 20; i++) { s.move(lq.sx + 4 + i, lq.sy + 30 + i * 2); step(1 / 30); }
+  step(0.5); s.up(0); step(1.5);
   moveTo(middle(lying)); s.down(0);
   for (let i = 0; i < 200 && world.get(lying.id); i++) step(1 / 30);
-  ok(!world.get(lying.id) && H.load?.kind === 'wood', `a press held still on an uprooted tree drains it (hand ${H.load?.amount})`);
-  ok(!f.since(n).some((e) => e.type === 'act' && e.verb === 'uproot'), 'draining a tree that was already uprooted acts no second uproot');
+  ok(pulled && !world.get(lying.id) && H.load?.kind === 'wood', `a tree pulled up and set down drains like a standing one (pulled ${pulled}, hand ${H.load?.amount})`);
+  const ups = f.since(n).filter((e) => e.type === 'act' && e.verb === 'uproot').length;
+  ok(ups === 1, `pulling a tree up and then draining it acts one uproot, not two (${ups})`);
   moveTo(over(pile)); step(0.2); s.up(0); step(1 / 30);
 
   // the woodpile: take wood out, drop part on a blueprint, pour the rest in
@@ -812,6 +817,11 @@ section('the amount label stays in view', () => {
   ok(mid.length > 0 && Math.min(...mid) > 60 - sprite.ax, `in the middle of the view the label is drawn right of the hand (${mid.length} px)`);
   ok(edge.length === mid.length, `at the right edge the whole label is drawn (${edge.length} of ${mid.length} px)`);
   ok(edge.length > 0 && Math.max(...edge) < W - 4 - sprite.ax, `at the right edge the label is left of the hand (rightmost column ${Math.max(...edge)}, hand from ${W - 4 - sprite.ax})`);
+  // the flip point: the last hand position whose label still fits on the right keeps it there, whole
+  const fit = W - 1 - (Math.max(...mid) - 60);
+  const atFit = labelCols(fit), past = labelCols(fit + 1);
+  ok(atFit.length === mid.length && Math.min(...atFit) > fit - sprite.ax && Math.max(...atFit) === W - 1, `a label that just fits stays right of the hand, whole (${atFit.length} of ${mid.length} px, rightmost column ${Math.max(...atFit)})`);
+  ok(past.length === mid.length && Math.max(...past) < fit + 1 - sprite.ax, `one pixel further right it moves left of the hand, whole (${past.length} of ${mid.length} px)`);
 });
 
 section('update and input handlers never touch the DOM or Math.random', () => {
