@@ -51,7 +51,7 @@ The engine is plain JavaScript ES modules with no framework. Vite serves and bui
 
 ## Coordinates
 
-World positions are in tiles: `x` and `y` on the 64 x 64 grid, `z` in height units. `worldToScreen(x, y, z)` returns world pixels: `sx = (x - y) * 16`, `sy = (x + y) * 8 - z * 8`. The camera position is the world pixel at the top-left of the view, so a view pixel is the world pixel minus the camera position.
+World positions are in tiles: `x` and `y` on the island's 192 x 192 grid, `z` in height units. The island's shapes were laid out on a 64 x 64 grid and are drawn `SCALE` (3) times larger (`src/world/island.js`); temples, village plateaus and the woods the villagers cut keep their tile distances from their village. `worldToScreen(x, y, z)` returns world pixels: `sx = (x - y) * 16`, `sy = (x + y) * 8 - z * 8`. The camera position is the world pixel at the top-left of the view, so a view pixel is the world pixel minus the camera position.
 
 `pickTile(screenX, screenY, heightAt, { w, h })` finds the terrain point under a world pixel. It walks the view ray from high to low and returns the first point at or under the surface, which is the front-most hit, then bisects to refine the height. The result is `{ x, y, z, tx, ty }` or `null` off the map. The pointer's world position goes through this pick on every move and every tick.
 
@@ -75,7 +75,7 @@ Each system keeps its internals in a folder of the same name under `src/` (`src/
 
 | Module | Job |
 |---|---|
-| `terrain.js` | Loads the island when the world has no map, draws land, water and cliffs from a cached buffer, and spawns the map's rocks. |
+| `terrain.js` | Loads the island when the world has no map, draws land, water and cliffs from a cached buffer kept in 128 px chunks that are painted the first time the view reaches them, and spawns the map's rocks. |
 | `village.js` | Both villages: villagers, jobs, hauling, building from blueprints, fields and worship power in `game.state.power`. Inert until `setup()`. |
 | `creature.js` | The giant: senses the world, lets its brain (`src/creature/brain.js`) pick an action, walks there and acts; learns from strokes and slaps; follows tethers. Inert until `setup()`. |
 | `hand.js` | The player's hand: grab, carry, drop and throw with arcs and shadows, stroke, slap and tether the creature. |
@@ -94,7 +94,7 @@ Each frame the renderer:
 1. Clears the view buffer to the background color.
 2. Runs terrain passes in registration order (`renderer.addTerrainPass(fn)` returns an unregister function).
 3. Calls each system's `draw(ctx)` in system order. Systems push world items into `ctx.list` or register screen overlays with `ctx.overlay(fn)`.
-4. Adds every world entity that has a `sprite` to the draw list.
+4. Adds every world entity whose `sprite` overlaps the view to the draw list (`spriteInView`). Entities off screen are skipped before sorting; on the island most of them are.
 5. Composites the back layer of every effect.
 6. Sorts the draw list by `x + y`, then `z`, then `id`, and draws it back to front.
 7. Composites the front layer of every effect.
@@ -180,27 +180,41 @@ node scripts/perf-check.mjs
 
 The check builds with Vite, serves the build from node and opens headed Chrome off screen and muted through `launchPlacedChrome()`. It first measures the display refresh rate from `requestAnimationFrame` in an empty page, then opens `?scenario=perf` (`src/dev/scenarios/perf.js`). After 5 s of warm-up it records 20 s of frames. The frame time is the gap between consecutive rAF timestamps. Inside the page, a profiler that wraps the game's own entry points splits each `game.frame` into sim ticks and render phases. Numbers go to stdout and to `D:/screenshots/Expedition/<folder>/perf/perf.json`, with a screenshot taken at the end of the window in `perf/perf-check/scene.png`. `--budget <ms>`, `--warmup <s>`, `--seconds <s>`, `--window <W>x<H>`, `--out <dir>` and `--scenario <name>` change the defaults.
 
-The scene boots like play, runs the sim 3 minutes fast-forward so the player village is full (4 houses, a storehouse, a woodpile, 2 fields and the temple; 12 villagers), and frames the player temple, the village and the creature. The creature is drawn with its final art (`src/art/painters/creature.js`). A tick hook then keeps all four miracles alive, each re-cast for free on its own period:
+The scene boots like play, then builds a town round each village through the village's own placement rules (`buildTown` in `src/dev/town.js`): 600 villagers in the player's and 120 in the rival's by default, with a house for every three villagers, a field per 15, a storehouse and a woodpile per 100. The player town is 200 houses, 40 fields, 6 storehouses and 6 woodpiles round the temple; every store holds enough that the woodpiles stay above the woodcutters' target and nobody goes hungry. A park with no buildings is kept round the densest wood near the camera, so the fires there stay out of reach of every house. The sim then settles for 30 s, and the camera frames the player temple, the town centre and the creature. `--town <n>` and `--rival <n>` change the town sizes (`?town=<n>&rival=<n>` on the URL). A tick hook keeps 40 house blueprints open in the player town, so about 80 builders keep hauling wood from the woodpiles, and keeps all four miracles alive, each re-cast for free on its own period:
 
-- Fire, every 3.5 s, on trees in view near the view centre, never on a building. A cast lights everything within the fire radius as one blaze, and a blaze catches at most `spreadBudget` (2) more entities, each jump at most `spreadReach` (1.5 tiles) edge to edge. So the scene casts only where everything the ring would light is more than 3.25 tiles from every building footprint. Each cast aims at a ring that lights 3 to 5 trees, which keeps 8 to 16 fires burning through the window and leaves enough forest in view for all of it. A burning tree carries the same flame effect as a burning building.
+- Fire, every 3.5 s, on trees in view near the view centre, never on a building. A cast lights everything within the fire radius as one blaze, and a blaze catches at most `spreadBudget` (2) more entities, each jump at most `spreadReach` (1.5 tiles) edge to edge. So the scene casts only where everything the ring would light is more than 3.25 tiles from every building footprint. Each cast aims at a ring that lights 3 to 5 trees, which keeps 7 to 17 fires burning through the window. A burning tree carries the same flame effect as a burning building.
 - Rain, every 8 s, on the player building farthest from the first fire, so it does not put the fires out.
 - Heal, every 2.5 s, on the village centre.
-- Lightning, every 2.5 s, beside the village: the spot nearest the village centre that keeps the bolt off buildings, lights no fire that could reach one, and stands at least 3.2 tiles from every villager where such a spot exists (else the spot farthest from them), so none can walk into the kill radius before the bolt lands.
+- Lightning, every 2.5 s, beside the village: the spot within 14 tiles of the village centre, nearest it, that keeps the bolt off buildings, lights no fire that could reach one, and stands at least 3.2 tiles from every villager where such a spot exists (else the spot farthest from them), so none can walk into the kill radius before the bolt lands.
 
 The check exits 1 when p95 is over budget or when the scene is no longer the worst case at the end of the window: player houses standing must be at least the count at window start minus 1, player villagers at least 80% of the start count, and each of the four miracle effects alive on every sim tick of the last 2 s. Two edited copies of the scene confirmed that this check can fail: one that aimed fire at the houses after its first cast lost 2 of 4 houses during the window, and one with lightning cast every 9 s had no live strike on 60 ticks of the last 2 s. Both exited 1 while their p95 stayed at 10.1 to 10.2 ms.
 
-Measured on this machine (100 Hz display, 2026-11-01), seed 1, three runs one after another. The scene is deterministic, so all three cast the same miracles (rain 3 times, fire 6, heal 8, lightning 8 in the window), with 14 live effects at window start and 18 at the end. Every run kept 4 of 4 houses, 9 of 9 player buildings and 12 of 12 villagers on every tick, with all four effects alive on every tick of the window. Another Claude session's headed Chrome was running for part of runs A and B; none was running during run C. The headline is the worst run, C:
+Measured on this machine (100 Hz display, 2026-11-02), seed 1, three runs one after another, and one run with towns of 1,000 and 200. The scene is deterministic: every run cast rain 3 times, fire 6, heal 8 and lightning 8 in the window, kept every house, building and villager on every tick (a birth added one villager), and had all four effects alive on every tick.
 
-| | Run A | Run B | Run C (headline) |
-|---|---|---|---|
-| Frames in 20 s | 1,996 | 1,995 | 1,988 |
-| Frame time median / p95 / p99 / max | 10.0 / 10.1 / 10.1 / 20.0 ms | 10.0 / 10.1 / 10.2 / 20.1 ms | 10.0 / 10.1 / 10.3 / 20.1 ms |
-| Frames over 16.7 ms | 5 (0.25%) | 6 (0.30%) | 13 (0.65%) |
-| `game.frame` work, median / p95 | 2.7 / 15.3 ms | 2.7 / 15.4 ms | 2.6 / 14.9 ms |
-| Frames that ran a sim tick: work median / p95 / max | 12.7 / 17.5 / 24.2 ms | 12.6 / 17.7 / 24.8 ms | 12.2 / 17.7 / 25.6 ms |
-| Effects composite, back + front (mean) | 1.2 + 2.9 ms | 1.2 + 3.0 ms | 1.2 + 2.9 ms |
+| | Run A | Run B | Run C | 1,000 + 200 villagers |
+|---|---|---|---|---|
+| Entities at window end | 2,708 | 2,708 | 2,708 | 3,289 |
+| Frame time median / p95 / p99 / max | 10.0 / 10.1 / 10.2 / 20.1 ms | 10.0 / 10.1 / 10.2 / 20.0 ms | 10.0 / 10.1 / 10.2 / 20.0 ms | 10.0 / 10.1 / 10.3 / 20.1 ms |
+| Frames over 16.7 ms | 2 (0.10%) | 1 (0.05%) | 3 (0.15%) | 9 (0.45%) |
+| `game.frame` work, median / p95 | 3.8 / 15.2 ms | 3.8 / 15.2 ms | 3.8 / 15.4 ms | 4.2 / 16.5 ms |
+| Frames that ran a sim tick: work median / p95 / max | 13.2 / 16.8 / 23.0 ms | 13.1 / 16.7 / 22.9 ms | 13.2 / 16.8 / 22.7 ms | 14.2 / 18.1 / 25.2 ms |
+| Effects composite on those frames, back + front (median) | 2.3 + 7.3 ms | 2.2 + 7.3 ms | 2.2 + 7.3 ms | 2.6 + 7.4 ms |
 
-Everything else in a render costs about 1.5 ms: terrain 0.7, sort and blit 0.4, overlays 0.2, systems draw 0.1. Sim ticks take about 0.2 ms each.
+Everything else in a render costs about 2.7 ms at 600 villagers: sort and blit 1.5 (about 800 sprites in view), terrain 0.5, systems draw 0.2, overlays 0.2. Sim ticks take about 0.5 ms each.
+
+### Crowds (step 2)
+
+Before step 2 the scene was the 64 x 64 island with 12 villagers. The same engine on the 192 x 192 island with the 600 + 120 towns measured p95 19.9 ms and failed the budget: `game.frame` work p95 19.8 ms, sort and blit 2.6 ms over all 2,685 entities, and sim ticks with spikes past 7 ms. Five changes, each measured on its own (`node scripts/sim-bench.mjs`, 640 x 360 view over the player town, numbers in ms):
+
+| Change | Before | After |
+|---|---|---|
+| Draw list holds only sprites that overlap the view (`spriteInView`, `src/render/renderer.js`) | sort + blit 1.41 over 2,659 items | 0.62 over 792 |
+| The village picks sprites only near the view and only when what they are picked by changes (`src/systems/village.js`) | village draw 1.08 | 0.29 |
+| Village paths search only as far as the starts asked of them, and resume for the next (`src/village/path.js`) | 1.27 per tick on average, p95 6.82 | 0.30, p95 0.39 |
+| Shared typed heap and per-map step masks for the creature's paths (`src/creature/path.js`) | 2.64 per field | 0.96 (tick max 7.7 to 3.8) |
+| `world.query({ kind })` walks that kind alone (`src/world/world.js`) | 0.31 per tick on average, p95 0.43 | 0.21, p95 0.37 |
+
+None of them changes what the sim does: 2,000 random path requests on the island give the same paths and distances as the old whole-map search, the creature's fields are identical, and a 120 s replay with 480 villagers ends in the same state with the old and the new code. The terrain cache, which took 0.6 s and 20 MB to build for the whole island at load, is now painted in 128 px chunks the first time the view reaches them, about 0.5 ms each, with each chunk byte for byte what the whole build holds (`scripts/check-terrain.mjs` compares all 1,200).
 
 The effects layer (`src/render/fx.js`) was 11.5 of the 12.8 ms a frame took before it was optimized. Two changes, neither of which changes a pixel:
 
@@ -209,4 +223,4 @@ The effects layer (`src/render/fx.js`) was 11.5 of the 12.8 ms a frame took befo
 
 Checked with a seeded random comparison (296,000 pixels, every alpha and light case, 0 differences) and a node replay of 400 frames with casts, camera pans and an option changed between ticks, rendered through the old and the new layer: the outputs differ only on the two frames where re-rendering after a cast differs in the old layer too. In the scene of that time (fire on houses first, which left every house a wreck about 10 s into the window), p95 went from 20.1 ms to 10.1 ms and the frames over 16.7 ms from 490 to 0.
 
-The margin is on frames that also run a sim tick: those repaint every effect, and pixelfx painting is most of their 12 ms. Their p95 of 17.5 to 17.7 ms is over a 60 Hz frame. On this 100 Hz display, where a frame lasts 10 ms, the rAF callback that follows such a frame runs late; the check prints those callback gaps too (p95 about 22 ms here). The rAF timestamps still advance every 10 ms except on the 5 to 13 frames per run that show a 20 ms gap, so p95 holds. A slower CPU would cross 16.7 ms on these frames first.
+The margin is on frames that also run a sim tick: those repaint every effect, and pixelfx painting is most of their 12 ms. Their p95 of 16.7 to 16.8 ms (18.1 ms with 1,000 villagers) is at or over a 60 Hz frame. On this 100 Hz display, where a frame lasts 10 ms, the rAF callback that follows such a frame runs late; the check prints those callback gaps too (p95 about 21 to 22 ms here). The rAF timestamps still advance every 10 ms except on the 1 to 9 frames per run that show a 20 ms gap, so p95 holds. A slower CPU would cross 16.7 ms on these frames first.

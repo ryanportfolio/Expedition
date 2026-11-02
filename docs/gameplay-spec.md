@@ -373,7 +373,7 @@ Costs are tribute / wood / ore where known. "Free" means no tribute.
 - **Important.** Rival tempo: the first land's rogue platoons move about 5 to 6 minutes in; expansion assaults about 10 minutes in; one expansion land casts a whirlwind at the player within minutes. [WIKI, FAN]
 - **Important.** Tribute: tutorials 1,000 to 5,000; challenges 5,000 to 50,000; land wins 100,000 to 120,000; wonders 400,000 to 1,000,000. [WIKI, GUIDE]
 
-Expedition aims at this scale ([decision 4](#decisions)): towns of hundreds of villagers with no fixed cap, homes of about 7 to 10, a field per several farmers, wood in the hundreds per building and thousands per grand building, tribute costs where the cheapest useful unlock takes one or two objectives and a wonder takes most of a land. The current 64 x 64 island cannot hold that, so the build order enlarges the world early (step 2).
+Expedition aims at this scale ([decision 4](#decisions)): towns of hundreds of villagers with no fixed cap, homes of about 7 to 10, a field per several farmers, wood in the hundreds per building and thousands per grand building, tribute costs where the cheapest useful unlock takes one or two objectives and a wonder takes most of a land. A 64 x 64 island could not hold that, so step 2 of the build order enlarged it to 192 x 192 and made the engine hold a town of 600 villagers within the frame budget.
 
 ---
 
