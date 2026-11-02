@@ -7,7 +7,7 @@
 //
 // Villager, rock, wood and orb sprites come from getSprite() under their own names once painters
 // exist; until then the art kit's test-pattern sprites stand in. The creature stand-in is drawn here.
-import { buildIsland } from '../../world/island.js';
+import { buildIsland, SCALE } from '../../world/island.js';
 import { debugTerrainPass } from '../test-art.js';
 import { lutFor } from '../../art/lut.js';
 import { idx } from '../../art/palette.js';
@@ -16,6 +16,10 @@ import { createSprite, ellipse, rect, outline, sphereShade, line } from '../../a
 import { HAND } from '../../systems/hand.js';
 import { groundToScreenVelocity } from '../../hand/tunables.js';
 import { predictLanding } from '../../hand/flight.js';
+
+// Spots below are written round the player village's 64 x 64 centre (20, 40); the island is drawn
+// SCALE times larger now (src/world/island.js), which moves the village to (20, 40) x SCALE.
+const OX = 20 * (SCALE - 1), OY = 40 * (SCALE - 1);
 
 const named = (name, opts, fallback, fallbackOpts) => (listSprites().includes(name) ? getSprite(name, opts) : getSprite(fallback, fallbackOpts));
 
@@ -27,8 +31,8 @@ function creatureStandIn() {
   ellipse(s, 15, 11, 5, 6, slate); // hooded head
   rect(s, 6, 20, 4, 24, slate); // arms hang long
   rect(s, 21, 20, 4, 24, slate);
-  rect(s, 11, 44, 3, 27, slate); // legs
-  rect(s, 17, 44, 3, 27, slate);
+  rect(s, OX + 11, OY + 44, 3, 27, slate); // legs
+  rect(s, OX + 17, OY + 44, 3, 27, slate);
   sphereShade(s, 'rock', { lo: 1, hi: 6, cx: 13, cy: 30, rx: 12, ry: 40 });
   rect(s, 13, 11, 5, 3, idx('ink', 0)); // the face stays in shadow
   line(s, 15, 26, 15, 30, idx('fire', 5)); // ember seam in the chest
@@ -57,12 +61,12 @@ export default async function hand(t, game) {
   const orbSprite = named('orb', { miracle: 'rain' }, 'test-sphere', { ramp: 'lightning', r: 3 });
   const wood = logStandIn();
   const sp = (kind, x, y, extra) => world.spawn(kind, { x, y, ...extra });
-  const villagers = [sp('villager', 19.5, 39.5, { hp: 1, sprite: fig }), sp('villager', 21.5, 41.5, { hp: 1, sprite: fig }), sp('villager', 18.5, 41.5, { hp: 1, sprite: fig })];
-  const rocks = [sp('rock', 19.5, 40.5, { sprite: rockSprite }), sp('rock', 23.5, 39.5, { sprite: rockSprite }), sp('rock', 16.5, 41.5, { sprite: rockSprite })];
-  sp('wood', 21.5, 38.5, { sprite: wood });
-  sp('wood', 22.0, 38.9, { sprite: wood });
-  sp('orb', 18.5, 38.5, { miracle: 'rain', sprite: orbSprite });
-  const creature = sp('creature', 26.5, 44.5, { sprite: creatureStandIn() });
+  const villagers = [sp('villager', OX + 19.5, OY + 39.5, { hp: 1, sprite: fig }), sp('villager', OX + 21.5, OY + 41.5, { hp: 1, sprite: fig }), sp('villager', OX + 18.5, OY + 41.5, { hp: 1, sprite: fig })];
+  const rocks = [sp('rock', OX + 19.5, OY + 40.5, { sprite: rockSprite }), sp('rock', OX + 23.5, OY + 39.5, { sprite: rockSprite }), sp('rock', OX + 16.5, OY + 41.5, { sprite: rockSprite })];
+  sp('wood', OX + 21.5, OY + 38.5, { sprite: wood });
+  sp('wood', OX + 22.0, OY + 38.9, { sprite: wood });
+  sp('orb', OX + 18.5, OY + 38.5, { miracle: 'rain', sprite: orbSprite });
+  const creature = sp('creature', OX + 26.5, OY + 44.5, { sprite: creatureStandIn() });
 
   const log = [];
   for (const type of ['grab', 'release', 'landed', 'act', 'stroke', 'slap', 'tether']) events.on(type, (e) => log.push({ type, ...e }));
@@ -90,7 +94,7 @@ export default async function hand(t, game) {
   const r0 = rocks[0];
   grab(r0, 0.1);
   t.assert(handSys.state.heldId === r0.id && since(n).some((e) => e.type === 'grab' && e.entityId === r0.id), 'left press grabs the rock (grab event)');
-  moveTo(ground(21.5, 42));
+  moveTo(ground(OX + 21.5, OY + 42));
   t.step(0.5);
   t.assert(Math.abs(r0.z - world.heightAt(r0.x, r0.y) - HAND.carryZ) < 0.1, `carried rock hovers above the terrain (${(r0.z - world.heightAt(r0.x, r0.y)).toFixed(2)})`);
   await t.shot('carry');
@@ -100,7 +104,7 @@ export default async function hand(t, game) {
   const rel0 = drop.find((e) => e.type === 'release');
   t.assert(rel0 && rel0.entityId === r0.id && rel0.kind === 'rock' && rel0.vx === 0 && rel0.vz === 0, `release event, still pointer drops: ${JSON.stringify(rel0)}`);
   t.assert(drop.some((e) => e.type === 'landed' && e.entityId === r0.id), 'landed event for the dropped rock');
-  t.assert(onTerrain(r0) && !r0.airborne && Math.hypot(r0.x - 21.5, r0.y - 42) < 0.2, `dropped rock rests on the terrain (${r0.x.toFixed(2)}, ${r0.y.toFixed(2)}, z ${r0.z.toFixed(2)} vs ${world.heightAt(r0.x, r0.y).toFixed(2)})`);
+  t.assert(onTerrain(r0) && !r0.airborne && Math.hypot(r0.x - (OX + 21.5), r0.y - (OY + 42)) < 0.2, `dropped rock rests on the terrain (${r0.x.toFixed(2)}, ${r0.y.toFixed(2)}, z ${r0.z.toFixed(2)} vs ${world.heightAt(r0.x, r0.y).toFixed(2)})`);
 
   // ---- 2. throw a rock far
   n = log.length;
@@ -136,8 +140,19 @@ export default async function hand(t, game) {
   t.assert(v1.hp === 1 && !since(n).some((e) => e.type === 'act' && e.weight === -0.6), `gently dropped villager keeps hp ${v1.hp}`);
   t.assert(onTerrain(v1), 'dropped villager stands on the terrain');
 
-  // ---- 4. throw a rock into the sea
-  const r2 = rocks[2];
+  // ---- 4. throw a rock into the sea. The sea is far from the village on the island, so the rock
+  // and the camera move to the walkable tile nearest the village with open water 3 tiles off.
+  const r2 = rocks[2], home = { x: camera.x, y: camera.y };
+  let shore = null;
+  for (let ty = 3, bd = Infinity; ty < world.h - 3; ty++) for (let tx = 3; tx < world.w - 3; tx++) {
+    const g = world.ground[ty * world.w + tx];
+    if (g < 2 || g > 4 || world.ground[ty * world.w + tx - 3] > HAND.waterGround) continue;
+    const d = Math.hypot(tx - site.x, ty - site.y);
+    if (d < bd) { bd = d; shore = { x: tx + 0.5, y: ty + 0.5 }; }
+  }
+  world.move(r2, shore.x, shore.y, world.heightAt(shore.x, shore.y));
+  camera.centerOn(shore.x, shore.y, world.heightAt(shore.x, shore.y));
+  t.step(1 / 30);
   grab(r2);
   const water = (q) => q && world.ground[Math.floor(q.y) * world.w + Math.floor(q.x)] <= HAND.waterGround;
   let dir = null;
@@ -167,6 +182,8 @@ export default async function hand(t, game) {
     t.step(HAND.sinkTime);
     t.assert(!world.get(r2.id), 'rock removed after sinking');
   }
+  camera.x = home.x; camera.y = home.y;
+  t.step(1 / 30);
 
   // ---- 5. stroke the creature
   n = log.length;

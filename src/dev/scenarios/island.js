@@ -14,9 +14,10 @@ import { screenToWorld } from '../../world/iso.js';
 import { WATER_LO, WATER_HI } from '../../terrain/cache.js';
 import { drawTerrain } from '../../terrain/pass.js';
 import { makeTestMap } from '../test-art.js';
+import { SCALE } from '../../world/island.js';
 
-const CLIFFS = { x: 18, y: 19 }; // Greyspine ridge, front face
-const COVE = { x: 44, y: 47 }; // Quiet Cove and its strand
+const CLIFFS = { x: 18 * SCALE, y: 19 * SCALE }; // Greyspine ridge, front face
+const COVE = { x: 44 * SCALE, y: 47 * SCALE }; // Quiet Cove and its strand
 
 /**
  * The 16 x 16 dev test map inside a one-tile border of deep water. The terrain draws no side faces
@@ -73,7 +74,7 @@ export default async function island(t, game) {
   const { world, renderer, camera, display } = game;
   const terrain = game.systems.terrain;
 
-  t.assert(world.w === 64 && world.h === 64 && world.sites.village, `terrain system loaded the island (${world.w}x${world.h})`);
+  t.assert(world.w === 64 * SCALE && world.h === 64 * SCALE && world.sites.village, `terrain system loaded the island (${world.w}x${world.h})`);
   const rocks = world.query({ kind: 'rock' });
   t.assert(rocks.length === world.rocks.length && rocks.length >= 20, `one rock entity per map rock (${rocks.length} of ${world.rocks.length})`);
   t.assert(rocks.every((r) => r.grabbable === true && r.hp === 1 && r.sprite && r.sprite.h >= 4), 'rock entities carry size, grabbable, hp and a sprite');
@@ -85,7 +86,10 @@ export default async function island(t, game) {
     t.assert(c.land === 0 || c.landDrawn === c.land, `${label}: every land tile in view drawn (${c.landDrawn} of ${c.land})`);
   };
 
-  // What the player sees on boot, before the village sets up: the LUT the terrain system installed.
+  // What the player sees on boot, before the village sets up: the LUT the terrain system installed,
+  // with the camera on the player's temple as the play bootstrap frames it (main.js).
+  const home = world.sites.temple;
+  camera.centerOn(home.x, home.y, world.heightAt(home.x, home.y));
   t.assert(renderer.lut.some((v) => v !== 0), 'terrain installed a usable default LUT');
   check('boot');
   await t.shot('boot');
@@ -100,7 +104,7 @@ export default async function island(t, game) {
 
   // Overview at scale 2 (the step that shows the most), centered on the island.
   display.setScale(2);
-  camera.centerOn(32, 32, 3);
+  camera.centerOn(32 * SCALE, 32 * SCALE, 3);
   t.step(1 / 30);
   check('overview');
   await t.shot('overview');
@@ -147,7 +151,7 @@ export default async function island(t, game) {
     let water = 0, changed = 0, landChanged = 0, same = true;
     for (let vy = 0; vy < h; vy++) for (let vx = 0; vx < w; vx++) {
       const i = vy * w + vx;
-      const v = cache.data[(vy + camY - cache.oy) * cache.w + vx + camX - cache.ox];
+      const v = cache.at(vx + camX - cache.ox, vy + camY - cache.oy);
       const isW = v >= WATER_LO && v <= WATER_HI;
       if (isW) water++;
       if (a[i] !== c[i]) same = false;

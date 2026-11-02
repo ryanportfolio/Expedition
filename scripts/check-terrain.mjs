@@ -17,7 +17,7 @@ import { createGame } from '../src/game.js';
 import { createWorld } from '../src/world/world.js';
 import { buildIsland } from '../src/world/island.js';
 import { worldToScreen } from '../src/world/iso.js';
-import { buildTerrainCache, PART, surfaceHeights, WATER_LO } from '../src/terrain/cache.js';
+import { buildTerrainCache, createTerrainChunks, CHUNK, PART, surfaceHeights, WATER_LO } from '../src/terrain/cache.js';
 import { drawTerrain } from '../src/terrain/pass.js';
 import { spriteInView } from '../src/render/renderer.js';
 import * as terrainSystem from '../src/systems/terrain.js';
@@ -52,6 +52,37 @@ ok(c1.w === (island.w + island.h) * 16 && c1.ox === -island.h * 16, `cache cover
 const filledIdx = c1.data.reduce((n, v) => n + (v ? 1 : 0), 0);
 ok(filledIdx > c1.w * c1.h * 0.45, `cache is mostly drawn (${filledIdx} of ${c1.w * c1.h} pixels)`);
 console.log(`island cache ${c1.w}x${c1.h} fnv ${fnv(c1.data)}`);
+
+// ------------------------------------------------------------------ chunks (the game's cache)
+// createTerrainChunks paints the cache in CHUNK-px pieces on first use; every chunk must hold the
+// bytes of the whole build, and the terrain pass must draw the same view from either.
+{
+  const ch = createTerrainChunks(w1);
+  let bad = 0;
+  for (let cj = 0; cj < ch.rows; cj++) for (let ci = 0; ci < ch.cols; ci++) {
+    const d = ch.chunk(ci, cj);
+    for (let y = 0; y < CHUNK; y++) for (let x = 0; x < CHUNK; x++) {
+      const X = ci * CHUNK + x, Y = cj * CHUNK + y;
+      if (d[y * CHUNK + x] !== (X < c1.w && Y < c1.h ? c1.data[Y * c1.w + X] : 0)) bad++;
+    }
+  }
+  ok(bad === 0 && ch.built === ch.cols * ch.rows, `every chunk holds the whole cache's bytes (${ch.cols}x${ch.rows} chunks, ${bad} differing bytes; ${(ch.paintMs / ch.built).toFixed(2)} ms a chunk)`);
+  const view = (cache, camX, camY) => {
+    const buf = new Uint32Array(640 * 360);
+    drawTerrain({ buf, w: 640, h: 360, camX, camY, lut: makeLut(0) }, cache, 3.2);
+    return buf;
+  };
+  const fresh = createTerrainChunks(w1);
+  let viewBad = 0;
+  for (const [x, y] of [[-600, 500], [c1.ox - 100, c1.oy - 50], [c1.ox + c1.w - 500, c1.oy + c1.h - 300], [0, 900]]) {
+    const a = view(c1, x, y), b = view(fresh, x, y);
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) viewBad++;
+  }
+  ok(viewBad === 0 && fresh.built > 0 && fresh.built < fresh.cols * fresh.rows, `the pass draws the same views from chunks as from the whole cache, painting only the chunks they touch (${viewBad} differing pixels, ${fresh.built} chunks painted)`);
+  const before = fresh.built;
+  view(fresh, -600, 500);
+  ok(fresh.built === before, 'a view drawn again paints no chunk');
+}
 
 // ------------------------------------------------------------------ diamonds at worldToScreen
 {

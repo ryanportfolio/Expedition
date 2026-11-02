@@ -23,7 +23,7 @@
 // Screenshots: pose-open, pose-grab, pose-hold, pose-hold-villager-water, pose-stroke, pose-slap,
 // pose-point, lut-evil, lut-good, board-grass, board-grass-close, board-water, board-water-close,
 // board-grass-evil, board-grass-evil-close, orbs.
-import { buildIsland } from '../../world/island.js';
+import { buildIsland, SCALE } from '../../world/island.js';
 import { debugTerrainPass } from '../test-art.js';
 import { makeLut, rgbaOf } from '../../art/lut.js';
 import { idx } from '../../art/palette.js';
@@ -35,6 +35,10 @@ import { HAND } from '../../hand/tunables.js';
 import * as handArt from '../../art/painters/hand.js';
 import * as shadowArt from '../../art/painters/shadows.js';
 import * as orbArt from '../../art/painters/orbs.js';
+
+// Spots below are written round the player village's 64 x 64 centre (20, 40); the island is drawn
+// SCALE times larger now (src/world/island.js), which moves the village to (20, 40) x SCALE.
+const OX = 20 * (SCALE - 1), OY = 40 * (SCALE - 1);
 
 const POSES = ['hand-open', 'hand-grab', 'hand-hold', 'hand-point', 'hand-stroke', 'hand-slap'];
 const SHADOWS = ['shadow-s', 'shadow-m', 'shadow-l'];
@@ -149,10 +153,10 @@ export default async function handArtScenario(t, game) {
   camera.centerOn(site.x + 4, site.y + 1, world.heightAt(site.x, site.y));
   const fig = named('villager', { pose: 'idle' }, 'test-figure');
   const sp = (kind, x, y, extra) => world.spawn(kind, { x, y, z: world.heightAt(x, y), ...extra });
-  const villager = sp('villager', 26.5, 39.5, { hp: 1, sprite: fig });
-  sp('villager', 23.5, 42.5, { hp: 1, sprite: fig });
-  const rock = sp('rock', 24.5, 39.5, { sprite: named('rock', { size: 2 }, 'test-sphere', { ramp: 'rock', r: 3 }) });
-  const creature = sp('creature', 25.5, 43.5, { sprite: creatureStandIn() });
+  const villager = sp('villager', OX + 26.5, OY + 39.5, { hp: 1, sprite: fig });
+  sp('villager', OX + 23.5, OY + 42.5, { hp: 1, sprite: fig });
+  const rock = sp('rock', OX + 24.5, OY + 39.5, { sprite: named('rock', { size: 2 }, 'test-sphere', { ramp: 'rock', r: 3 }) });
+  const creature = sp('creature', OX + 25.5, OY + 43.5, { sprite: creatureStandIn() });
   t.step(0.2);
 
   // 3x inset of the hand for the pose shots: the last system in the draw order queues an overlay three
@@ -188,7 +192,7 @@ export default async function handArtScenario(t, game) {
   };
   const moveTo = (q) => { s.move(q.sx, q.sy); tick(); };
   // the open and carry poses hang over grass (ground type 3 on the island map), off the village square
-  const OPEN = [27.5, 42.5], CARRY = [28.5, 43.5];
+  const OPEN = [OX + 27.5, OY + 42.5], CARRY = [OX + 28.5, OY + 43.5];
   const grass = ([x, y]) => world.ground[Math.floor(y) * world.w + Math.floor(x)] === 3;
   t.assert(grass(OPEN) && grass(CARRY), 'hover and carry spots are grass');
   /** Share of `sprite`'s opaque pixels found in the view buffer, drawn at view (vx, vy) under the LUT. */
@@ -261,7 +265,9 @@ export default async function handArtScenario(t, game) {
   t.step(1);
 
   // pinch a villager and hold it out over open water (the nearest tile with water two tiles around
-  // it), the camera between the two; then back over the grass to set it down gently
+  // it), the camera between the two; then back over the grass to set it down gently. The sea is far
+  // from the village on the island, so the villager is first moved to grass 3 to 6 tiles from that
+  // water (nearest the village), and is set down there again.
   {
     const isWater = (x, y) => world.ground[y * world.w + x] <= HAND.waterGround;
     let sea = null;
@@ -271,8 +277,16 @@ export default async function handArtScenario(t, game) {
       const d = Math.hypot(tx + 0.5 - villager.x, ty + 0.5 - villager.y);
       if (open && (!sea || d < sea.d)) sea = { x: tx + 0.5, y: ty + 0.5, d };
     }
-    t.assert(sea && sea.d < 20, `open water near the villager (${sea ? sea.d.toFixed(1) : 'none'} tiles)`);
-    if (sea) {
+    let rest = null;
+    if (sea) for (let ty = 2; ty < world.h - 2; ty++) for (let tx = 2; tx < world.w - 2; tx++) {
+      const gap = Math.hypot(tx + 0.5 - sea.x, ty + 0.5 - sea.y), d = Math.hypot(tx + 0.5 - villager.x, ty + 0.5 - villager.y);
+      if (world.ground[ty * world.w + tx] === 3 && gap >= 3 && gap <= 6 && (!rest || d < rest.d)) rest = { x: tx + 0.5, y: ty + 0.5, d };
+    }
+    t.assert(sea && rest, `open water with grass 3 to 6 tiles off it (${sea ? `${sea.d.toFixed(1)} tiles from the villager` : 'none'})`);
+    if (sea && rest) {
+      world.move(villager, rest.x, rest.y, world.heightAt(rest.x, rest.y));
+      Object.assign(villager, { path: null, work: null, wait: 5 });
+      sea.d = Math.hypot(sea.x - rest.x, sea.y - rest.y);
       camera.centerOn((sea.x + villager.x) / 2, (sea.y + villager.y) / 2, world.heightAt(villager.x, villager.y));
       t.step(0.2);
       moveTo(middle(villager));
@@ -289,7 +303,7 @@ export default async function handArtScenario(t, game) {
       t.assert(hv.sy > top && hv.sy <= Math.min(top + 6, vv.sy), `pinch just inside the villager's top (grip y ${hv.sy}, villager top ${top}, foot ${vv.sy})`);
       await pose('hand-hold', 'pose-hold-villager-water');
       // set it down on the grass: pointer at rest there first, so the release is a drop, not a throw
-      moveTo(ground(...OPEN));
+      moveTo(ground(rest.x, rest.y));
       t.step(0.6);
       s.up(0);
       t.step(1.5);
@@ -318,7 +332,7 @@ export default async function handArtScenario(t, game) {
   moveTo(middle(creature));
   s.down(0); s.up(0);
   tick();
-  moveTo(ground(23.5, 44.5));
+  moveTo(ground(OX + 23.5, OY + 44.5));
   await pose('hand-point', 'pose-point');
   t.input.key('Escape');
   tick();

@@ -142,9 +142,10 @@ export default async function perf(t, game) {
   const t0 = world.sites.temple, v0 = world.sites.village, c0 = cs.entity;
   const look = { x: (t0.x + v0.x + 0.5 + c0.x) / 3, y: (t0.y + v0.y + 0.5 + c0.y) / 3 };
   const woods = world.query({ kind: 'tree', x: look.x, y: look.y, r: 16 });
-  const density = (tr) => woods.filter((o) => Math.hypot(o.x - tr.x, o.y - tr.y) <= 4).length;
+  const WOOD_R = 6; // the park's wood: trees this far from its middle stay farther than FIRE_SAFE from every building
+  const density = (tr) => woods.filter((o) => Math.hypot(o.x - tr.x, o.y - tr.y) <= WOOD_R).length;
   const park = woods.map((tr) => ({ x: tr.x, y: tr.y, n: density(tr) })).sort((a, b) => b.n - a.n || a.y - b.y || a.x - b.x)[0] ?? look;
-  const PARK_R = 4 + FIRE_SAFE + 2.5; // wood radius + fire reach + half a building
+  const PARK_R = WOOD_R + FIRE_SAFE + 2.5; // wood radius + fire reach + half a building
   const keepOut = (x, y) => Math.hypot(x - park.x, y - park.y) < PARK_R;
   const town = buildTown(game, 'player', pop.player, keepOut);
   buildTown(game, 'rival', pop.rival, () => false);

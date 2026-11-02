@@ -67,11 +67,12 @@ export default async function bulkHand(t, game) {
   for (let i = 0; i < 150 && world.get(tree.id); i++) tick();
   t.assert(!world.get(tree.id) && H.load?.amount === want, `the tree is gone once all ${want} wood is drawn (hand ${H.load?.amount})`);
   const w0 = pile.wood;
-  glide(over(pile));
+  glide(over(pile)); // trees it passes over on the way are drawn or swept up too
   t.step(0.2);
+  const logs = H.load?.amount ?? 0;
   s.up(0);
   tick();
-  t.assert(pile.wood === w0 + want && !H.held.length, `dropped on the woodpile, the wood goes into stock (${w0} -> ${pile.wood})`);
+  t.assert(logs >= want && pile.wood === w0 + logs && !H.held.length, `dropped on the woodpile, the ${logs} wood goes into stock (${w0} -> ${pile.wood})`);
 
   // ---- 3. woodpile -> blueprint: pour to god-build
   pile.wood = Math.max(pile.wood, 2000);
