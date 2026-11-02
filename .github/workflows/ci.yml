@@ -28,3 +28,21 @@ jobs:
       - run: npm run build
       - run: npm run check
       - run: npm run check:ip
+
+  # Separate job: dependabot-playwright-automerge.yml requires the check named "ci" above by name
+  # (and waits on every other check, this one included).
+  firmware:
+    name: firmware
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Codex skills sync check (drift warns, broken input fails)
+        run: node .claude/scripts/sync-codex-skills.mjs --check
