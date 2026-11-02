@@ -180,6 +180,8 @@ export async function creatureTrial(game, h) {
           return n;
         };
         cs.debug.candidateFilter = (c) => c.key === 'idle:none';
+        // older heaps still fertilizing this field would add their rate too: only the fresh one stays
+        for (const d of world.query({ kind: 'dung' })) if (d !== heap) world.remove(d.id);
         world.move(heap, field.x, field.y, world.heightAt(field.x, field.y));
         field.growth = 0;
         const withDung = tally(true);

@@ -12,7 +12,8 @@
 //
 //   node scripts/check-village.mjs
 import { createGame } from '../src/game.js';
-import { buildIsland } from '../src/world/island.js';
+import { createWorld } from '../src/world/world.js';
+import { buildIsland, SCALE } from '../src/world/island.js';
 import { createRng } from '../src/engine/rng.js';
 import { VILLAGE } from '../src/village/config.js';
 import { createPaths } from '../src/village/path.js';
@@ -28,7 +29,7 @@ function check(cond, msg) {
   return !!cond;
 }
 const MIN = 60 * 30; // ticks per sim minute
-const W = 64;
+const W = 64 * SCALE;
 
 function newGame(seed = 1) {
   const game = createGame({ seed });
@@ -190,7 +191,7 @@ function record(game) {
   const { world } = game;
   const temple = buildings(game, 'player', 'temple')[0];
   const found = {};
-  for (let ty = 2; ty < 62; ty++) for (let tx = 2; tx < 62; tx++) {
+  for (let ty = 2; ty < W - 2; ty++) for (let tx = 2; tx < W - 2; tx++) {
     const r = vs.validate('house', tx, ty);
     if (!r.ok) found[r.reason] ??= [tx, ty];
   }
@@ -409,6 +410,28 @@ function longRun(seed) {
   }
   check(pathsFor(make(false, true)).paths.find(1 * S + 1, 1 * S + 12) === null, 'synthetic map: with no ramp the top of the cliff is unreachable (null)');
   check(pathsFor(make(true, false)).paths.find(1 * S + 1, 8 * S + 1) === null, 'synthetic map: with no ford the far bank of the water is unreachable (null)');
+}
+// A search runs only as far as the starts asked of it and resumes for the next (src/village/path.js):
+// on the island, paths and distances from searches resumed start by start must equal those read off
+// searches first run to the end, for near and far starts, unreachable ones and repeat goals.
+{
+  const world = createWorld().loadMap(buildIsland());
+  const lazy = createPaths(world), full = createPaths(world);
+  const N = world.w * world.h, walk = [];
+  for (let i = 0; i < N; i++) if (world.ground[i] >= 2 && world.ground[i] <= 4) walk.push(i);
+  let seed = 11;
+  const rnd = () => (seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296;
+  const goals = Array.from({ length: 12 }, () => walk[(rnd() * walk.length) | 0]);
+  for (const g of goals) full.field(g); // run to the end
+  let same = 0, unreachable = 0;
+  const pairs = 600;
+  for (let k = 0; k < pairs; k++) {
+    const g = goals[(rnd() * goals.length) | 0], s = k % 20 === 0 ? (rnd() * N) | 0 : walk[(rnd() * walk.length) | 0];
+    const a = lazy.find(s, g), b = full.find(s, g);
+    if (JSON.stringify(a) === JSON.stringify(b) && lazy.distance(s, g) === full.distance(s, g)) same++;
+    if (!b) unreachable++;
+  }
+  check(same === pairs && unreachable > 0, `paths: searches resumed per start match searches run to the end (${same}/${pairs} pairs, ${unreachable} unreachable)`);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1057,21 +1080,21 @@ const overlaps = (game) => {
   world.loadMap(buildIsland());
   const vs = game.systems.village;
   vs.setup();
-  const opts = { setup: true }; // isolates the ground, building and rock rules from influence and trees
-  const rec = world.rocks.find((r) => vs.validate('house', Math.floor(r.x), Math.floor(r.y), 'player', opts).reason === 'a rock is in the way');
+  const opts = { setup: true }; // isolates the ground, building and rock rules from influence and trees (sim.validate: the system's validate takes no options)
+  const rec = world.rocks.find((r) => vs.sim.validate('house', Math.floor(r.x), Math.floor(r.y), 'player', opts).reason === 'a rock is in the way');
   check(!!rec, `live rocks: before the first tick a map rock record blocks a house on its tile (${rec ? `${rec.x},${rec.y}` : 'none found'})`);
   game.tick(1 / 30);
   const tx = Math.floor(rec.x), ty = Math.floor(rec.y);
   const rock = world.query({ kind: 'rock' }).find((r) => r.x === rec.x && r.y === rec.y);
-  check(!!rock && vs.validate('house', tx, ty, 'player', opts).reason === 'a rock is in the way', 'live rocks: after the first tick its rock entity blocks the same tile');
+  check(!!rock && vs.sim.validate('house', tx, ty, 'player', opts).reason === 'a rock is in the way', 'live rocks: after the first tick its rock entity blocks the same tile');
   // somewhere free to put it down: the nearest tile a house fits on
   let to = null;
   for (let r = 3; r <= 12 && !to; r++)
     for (let dy = -r; dy <= r && !to; dy++)
       for (let dx = -r; dx <= r && !to; dx++)
-        if (Math.max(Math.abs(dx), Math.abs(dy)) === r && vs.validate('house', tx + dx, ty + dy, 'player', opts).ok) to = { tx: tx + dx, ty: ty + dy };
+        if (Math.max(Math.abs(dx), Math.abs(dy)) === r && vs.sim.validate('house', tx + dx, ty + dy, 'player', opts).ok) to = { tx: tx + dx, ty: ty + dy };
   world.move(rock, to.tx + 0.5, to.ty + 0.5, world.heightAt(to.tx + 0.5, to.ty + 0.5)); // the hand carried it there
-  const old = vs.validate('house', tx, ty, 'player', opts), now = vs.validate('house', to.tx, to.ty, 'player', opts);
+  const old = vs.sim.validate('house', tx, ty, 'player', opts), now = vs.sim.validate('house', to.tx, to.ty, 'player', opts);
   check(old.ok && now.reason === 'a rock is in the way',
     `live rocks: once moved, its old tile ${tx},${ty} takes a house (${old.reason ?? 'ok'}) and its new tile ${to.tx},${to.ty} does not (${now.reason ?? 'ok'})`);
   check(world.rocks.includes(rec), 'live rocks: the map keeps its authored rock records');

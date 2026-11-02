@@ -7,7 +7,12 @@
 // The check also runs itself against deliberately broken copies of the island
 // and fails if any rule misses the break it is meant to catch.
 
-import { buildIsland } from '../src/world/island.js';
+import { buildIsland, SCALE } from '../src/world/island.js';
+
+const W = 64 * SCALE;
+const N = W * W;
+const MIN_TREES = 150 * SCALE * SCALE;
+const MIN_ROCKS = 20 * SCALE * SCALE;
 
 const quiet = process.argv.includes('--quiet');
 
@@ -26,27 +31,27 @@ const D8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]
 function shapeProblems(m) {
   const p = [];
   if (!m || typeof m !== 'object') return ['buildIsland() did not return an object'];
-  if (m.w !== 64 || m.h !== 64) p.push(`size is ${m.w}x${m.h}, want 64x64`);
+  if (m.w !== W || m.h !== W) p.push(`size is ${m.w}x${m.h}, want ${W}x${W}`);
   if (m.seaLevel !== 2) p.push(`seaLevel is ${m.seaLevel}, want 2`);
-  if (!(m.height instanceof Uint8Array) || m.height.length !== 4096) p.push('height is not a Uint8Array(4096)');
-  if (!(m.ground instanceof Uint8Array) || m.ground.length !== 4096) p.push('ground is not a Uint8Array(4096)');
+  if (!(m.height instanceof Uint8Array) || m.height.length !== N) p.push(`height is not a Uint8Array(${N})`);
+  if (!(m.ground instanceof Uint8Array) || m.ground.length !== N) p.push(`ground is not a Uint8Array(${N})`);
   if (!Array.isArray(m.trees)) p.push('trees is not an array');
   if (!Array.isArray(m.rocks)) p.push('rocks is not an array');
   const s = m.sites || {};
   for (const k of ['temple', 'village', 'rival', 'rivalTemple', 'creatureStart']) {
     const v = s[k];
-    if (!v || !Number.isInteger(v.x) || !Number.isInteger(v.y) || v.x < 0 || v.y < 0 || v.x > 63 || v.y > 63) {
+    if (!v || !Number.isInteger(v.x) || !Number.isInteger(v.y) || v.x < 0 || v.y < 0 || v.x > W - 1 || v.y > W - 1) {
       p.push(`sites.${k} missing or not an integer tile inside the map`);
     }
   }
   for (const k of ['village', 'rival']) if (s[k] && typeof s[k].r !== 'number') p.push(`sites.${k}.r missing`);
   if (p.length) return p;
-  for (let i = 0; i < 4096; i++) {
+  for (let i = 0; i < N; i++) {
     if (m.height[i] > 15) p.push(`height ${m.height[i]} at ${xy(i)} is over 15`);
     if (m.ground[i] > 5) p.push(`ground ${m.ground[i]} at ${xy(i)} is not 0..5`);
     if (p.length > 5) break;
   }
-  const objOk = (o) => typeof o.x === 'number' && typeof o.y === 'number' && o.x >= 0 && o.y >= 0 && o.x < 64 && o.y < 64;
+  const objOk = (o) => typeof o.x === 'number' && typeof o.y === 'number' && o.x >= 0 && o.y >= 0 && o.x < W && o.y < W;
   m.trees.forEach((t, n) => {
     if (!objOk(t)) p.push(`tree ${n} position (${t.x},${t.y}) is outside the map`);
     else if (t.kind !== 'pine' && t.kind !== 'broad') p.push(`tree ${n} has kind ${t.kind}`);
@@ -74,7 +79,7 @@ const RULES = [
     run(m) {
       const p = [];
       each((x, y, i) => {
-        if (Math.min(x, y, 63 - x, 63 - y) > 4) return;
+        if (Math.min(x, y, W - 1 - x, W - 1 - y) > 4) return;
         if (!isWater(m.ground[i]) || m.height[i] > m.seaLevel) p.push(`(${x},${y}) is ${gname(m, i)} h${m.height[i]}`);
       });
       return p;
@@ -150,7 +155,7 @@ const RULES = [
     run(m) {
       let n = 0;
       each((x, y, i) => (n += isLandG(m.ground[i]) ? 1 : 0));
-      const f = n / 4096;
+      const f = n / N;
       this.info = `${n} land tiles = ${(f * 100).toFixed(1)}%`;
       return f >= 0.35 && f <= 0.65 ? [] : [`land fraction ${(f * 100).toFixed(1)}%`];
     },
@@ -178,14 +183,14 @@ const RULES = [
         floors[key] = hi;
         for (const [kind, o] of objs) {
           const t = tileOf(o);
-          const tx = t % 64;
-          const ty = (t / 64) | 0;
+          const tx = t % W;
+          const ty = (t / W) | 0;
           if (inCircle(tx, ty, c) || inCircle(o.x, o.y, c)) p.push(`${kind} at (${o.x},${o.y}) is inside the ${key} circle`);
         }
       }
       const v = s.village;
       const t = s.temple;
-      const ti = t.y * 64 + t.x;
+      const ti = t.y * W + t.x;
       const td = Math.hypot(t.x - v.x, t.y - v.y);
       if (td > 8) p.push(`temple is ${td.toFixed(2)} tiles from the village centre`);
       if (inCircle(t.x, t.y, v)) p.push('temple is inside the village circle');
@@ -198,22 +203,22 @@ const RULES = [
   },
   {
     id: 8,
-    name: 'villages at least 28 tiles apart and joined by a walkable 4-neighbour path',
+    name: `villages at least ${28 * SCALE} tiles apart and joined by a walkable 4-neighbour path`,
     run(m) {
       const p = [];
       const v = m.sites.village;
       const r = m.sites.rival;
       const d = Math.hypot(v.x - r.x, v.y - r.y);
-      if (d < 28) p.push(`centres ${d.toFixed(2)} tiles apart`);
-      const start = v.y * 64 + v.x;
-      const goal = r.y * 64 + r.x;
-      const dist = new Int32Array(4096).fill(-1);
+      if (d < 28 * SCALE) p.push(`centres ${d.toFixed(2)} tiles apart`);
+      const start = v.y * W + v.x;
+      const goal = r.y * W + r.x;
+      const dist = new Int32Array(N).fill(-1);
       if (isWalkG(m.ground[start])) {
         dist[start] = 0;
         const q = [start];
         for (let k = 0; k < q.length; k++) {
           const i = q[k];
-          for (const j of nb(i % 64, (i / 64) | 0, D4)) {
+          for (const j of nb(i % W, (i / W) | 0, D4)) {
             if (dist[j] >= 0 || !isWalkG(m.ground[j])) continue;
             if (Math.abs(m.height[i] - m.height[j]) > 1) continue;
             dist[j] = dist[i] + 1;
@@ -228,16 +233,16 @@ const RULES = [
   },
   {
     id: 9,
-    name: 'trees >= 150 on grass/dirt, none in circles, >= 15 near each village; rocks >= 20 on land',
+    name: `trees >= ${MIN_TREES} on grass/dirt, none in circles, >= 15 near each village; rocks >= ${MIN_ROCKS} on land`,
     run(m) {
       const p = [];
       const s = m.sites;
-      if (m.trees.length < 150) p.push(`${m.trees.length} trees`);
+      if (m.trees.length < MIN_TREES) p.push(`${m.trees.length} trees`);
       for (const t of m.trees) {
         const i = tileOf(t);
         if (m.ground[i] !== 3 && m.ground[i] !== 4) p.push(`tree at (${t.x},${t.y}) on ${gname(m, i)}`);
         for (const key of ['village', 'rival']) {
-          if (inCircle(i % 64, (i / 64) | 0, s[key]) || inCircle(t.x, t.y, s[key])) p.push(`tree at (${t.x},${t.y}) in the ${key} circle`);
+          if (inCircle(i % W, (i / W) | 0, s[key]) || inCircle(t.x, t.y, s[key])) p.push(`tree at (${t.x},${t.y}) in the ${key} circle`);
         }
       }
       const near = {};
@@ -246,7 +251,7 @@ const RULES = [
         near[key] = m.trees.filter((t) => Math.hypot(t.x - c.x, t.y - c.y) <= 12).length;
         if (near[key] < 15) p.push(`${near[key]} trees within 12 tiles of the ${key}`);
       }
-      if (m.rocks.length < 20) p.push(`${m.rocks.length} rocks`);
+      if (m.rocks.length < MIN_ROCKS) p.push(`${m.rocks.length} rocks`);
       for (const r of m.rocks) {
         const i = tileOf(r);
         if (!isLandG(m.ground[i])) p.push(`rock at (${r.x},${r.y}) on ${gname(m, i)}`);
@@ -263,7 +268,7 @@ const RULES = [
       const p = [];
       const c = m.sites.creatureStart;
       const v = m.sites.village;
-      const i = c.y * 64 + c.x;
+      const i = c.y * W + c.x;
       const d = Math.hypot(c.x - v.x, c.y - v.y);
       if (!isWalkG(m.ground[i])) p.push(`creature start is ${gname(m, i)}`);
       if (d > 10) p.push(`creature start is ${d.toFixed(2)} tiles away`);
@@ -284,7 +289,7 @@ const DETERMINISM = {
 // ---------------------------------------------------------------------------
 
 function each(fn) {
-  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) fn(x, y, y * 64 + x);
+  for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) fn(x, y, y * W + x);
 }
 
 function nb(x, y, dirs) {
@@ -292,13 +297,13 @@ function nb(x, y, dirs) {
   for (const [dx, dy] of dirs) {
     const nx = x + dx;
     const ny = y + dy;
-    if (nx >= 0 && ny >= 0 && nx < 64 && ny < 64) out.push(ny * 64 + nx);
+    if (nx >= 0 && ny >= 0 && nx < W && ny < W) out.push(ny * W + nx);
   }
   return out;
 }
 
 function xy(i) {
-  return `(${i % 64},${(i / 64) | 0})`;
+  return `(${i % W},${(i / W) | 0})`;
 }
 
 function gname(m, i) {
@@ -306,7 +311,7 @@ function gname(m, i) {
 }
 
 function tileOf(o) {
-  return Math.floor(o.y) * 64 + Math.floor(o.x);
+  return Math.floor(o.y) * W + Math.floor(o.x);
 }
 
 function inCircle(x, y, c) {
@@ -316,20 +321,20 @@ function inCircle(x, y, c) {
 // Chebyshev (8-neighbour) distance from each tile to the nearest water tile.
 // Off-map counts as water, which matches a map whose border is all water.
 function waterDistance(m) {
-  const d = new Int32Array(4096).fill(-1);
+  const d = new Int32Array(N).fill(-1);
   const q = [];
   each((x, y, i) => {
     if (isWater(m.ground[i])) {
       d[i] = 0;
       q.push(i);
-    } else if (x === 0 || y === 0 || x === 63 || y === 63) {
+    } else if (x === 0 || y === 0 || x === W - 1 || y === W - 1) {
       d[i] = 1;
       q.push(i);
     }
   });
   for (let k = 0; k < q.length; k++) {
     const i = q[k];
-    for (const j of nb(i % 64, (i / 64) | 0, D8)) {
+    for (const j of nb(i % W, (i / W) | 0, D8)) {
       if (d[j] < 0) {
         d[j] = d[i] + 1;
         q.push(j);
@@ -397,19 +402,19 @@ function asciiMap(m) {
   });
   for (const r of m.rocks) chars[tileOf(r)] = 'o';
   for (const t of m.trees) chars[tileOf(t)] = 'T';
-  for (const s of [m.sites.temple, m.sites.rivalTemple]) chars[s.y * 64 + s.x] = '*';
+  for (const s of [m.sites.temple, m.sites.rivalTemple]) chars[s.y * W + s.x] = '*';
   const c = m.sites.creatureStart;
-  chars[c.y * 64 + c.x] = 'C';
+  chars[c.y * W + c.x] = 'C';
   const lines = ['    ' + colRuler(), ];
-  for (let y = 0; y < 64; y++) lines.push(String(y).padStart(2, ' ') + '  ' + chars.slice(y * 64, y * 64 + 64).join(''));
+  for (let y = 0; y < W; y++) lines.push(String(y).padStart(2, ' ') + '  ' + chars.slice(y * W, y * W + W).join(''));
   return lines.join('\n');
 }
 
 function heightDump(m) {
   const lines = ['    ' + colRuler()];
-  for (let y = 0; y < 64; y++) {
+  for (let y = 0; y < W; y++) {
     let row = '';
-    for (let x = 0; x < 64; x++) row += m.height[y * 64 + x].toString(16);
+    for (let x = 0; x < W; x++) row += m.height[y * W + x].toString(16);
     lines.push(String(y).padStart(2, ' ') + '  ' + row);
   }
   return lines.join('\n');
@@ -417,7 +422,7 @@ function heightDump(m) {
 
 function colRuler() {
   let s = '';
-  for (let x = 0; x < 64; x++) s += x % 10 === 0 ? String((x / 10) | 0) : ' ';
+  for (let x = 0; x < W; x++) s += x % 10 === 0 ? String((x / 10) | 0) : ' ';
   return s;
 }
 
@@ -426,37 +431,37 @@ function selfTest(base) {
   const v = base.sites.village;
   const r = base.sites.rival;
   const firstWalkInCircle = (m, c) => {
-    for (let i = 0; i < 4096; i++) if (inCircle(i % 64, (i / 64) | 0, c) && isWalkG(m.ground[i])) return i;
+    for (let i = 0; i < N; i++) if (inCircle(i % W, (i / W) | 0, c) && isWalkG(m.ground[i])) return i;
     return -1;
   };
   const firstLandPairStep = (m) => {
-    for (let i = 0; i < 4096; i++) {
+    for (let i = 0; i < N; i++) {
       if (m.ground[i] !== 3) continue;
-      const x = i % 64;
-      if (x < 63 && m.ground[i + 1] === 3) return i;
+      const x = i % W;
+      if (x < W - 1 && m.ground[i + 1] === 3) return i;
     }
     return -1;
   };
   const cases = [
-    { rule: 1, what: 'land on the border', mut: (m) => { m.ground[2 * 64 + 30] = 3; m.height[2 * 64 + 30] = 3; } },
+    { rule: 1, what: 'land on the border', mut: (m) => { m.ground[2 * W + 30] = 3; m.height[2 * W + 30] = 3; } },
     { rule: 2, what: 'deep water next to land', mut: (m) => { const i = m.ground.indexOf(1); m.ground[i] = 0; } },
     { rule: 2, what: 'land at sea level', mut: (m) => { const i = m.ground.indexOf(3); m.height[i] = m.seaLevel; } },
     { rule: 3, what: 'grass on the shore', mut: (m) => { const i = m.ground.indexOf(2); m.ground[i] = 3; } },
-    { rule: 3, what: 'sand far inland', mut: (m) => { m.ground[v.y * 64 + v.x] = 2; } },
+    { rule: 3, what: 'sand far inland', mut: (m) => { m.ground[v.y * W + v.x] = 2; } },
     { rule: 4, what: 'a 2-high step on grass', mut: (m) => { const i = firstLandPairStep(m); m.height[i + 1] = m.height[i] + 2; } },
     { rule: 5, what: 'a peak of 13', mut: (m) => { const i = m.ground.indexOf(5); m.height[i] = 13; } },
-    { rule: 5, what: 'flat land', mut: (m) => { for (let i = 0; i < 4096; i++) if (isLandG(m.ground[i])) m.height[i] = 3 + (i % 2); } },
-    { rule: 6, what: 'too much land', mut: (m) => { each((x, y, i) => { if (Math.min(x, y, 63 - x, 63 - y) > 4) m.ground[i] = 3; }); } },
+    { rule: 5, what: 'flat land', mut: (m) => { for (let i = 0; i < N; i++) if (isLandG(m.ground[i])) m.height[i] = 3 + (i % 2); } },
+    { rule: 6, what: 'too much land', mut: (m) => { each((x, y, i) => { if (Math.min(x, y, W - 1 - x, W - 1 - y) > 4) m.ground[i] = 3; }); } },
     { rule: 7, what: 'a tree in the village', mut: (m) => { m.trees[0].x = v.x + 0.5; m.trees[0].y = v.y + 0.5; } },
     { rule: 7, what: 'uneven village floor', mut: (m) => { m.height[firstWalkInCircle(m, v)] += 2; } },
-    { rule: 7, what: 'temple level with the village', mut: (m) => { const t = m.sites.temple; m.height[t.y * 64 + t.x] = m.height[v.y * 64 + v.x]; } },
+    { rule: 7, what: 'temple level with the village', mut: (m) => { const t = m.sites.temple; m.height[t.y * W + t.x] = m.height[v.y * W + v.x]; } },
     { rule: 7, what: 'rival temple outside its circle', mut: (m) => { m.sites.rivalTemple = { x: r.x + 9, y: r.y }; } },
-    { rule: 8, what: 'villages too close', mut: (m) => { m.sites.rival = { ...r, x: v.x + 20, y: v.y }; } },
+    { rule: 8, what: 'villages too close', mut: (m) => { m.sites.rival = { ...r, x: v.x + 20 * SCALE, y: v.y }; } },
     { rule: 8, what: 'rival walled off by rock', mut: (m) => { each((x, y, i) => { const d = Math.hypot(x - r.x, y - r.y); if (d > r.r + 0.5 && d < r.r + 1.6) m.ground[i] = 5; }); } },
-    { rule: 9, what: 'too few trees', mut: (m) => { m.trees.length = 149; } },
-    { rule: 9, what: 'a tree on sand', mut: (m) => { const i = m.ground.indexOf(2); m.trees[0].x = (i % 64) + 0.5; m.trees[0].y = ((i / 64) | 0) + 0.5; } },
+    { rule: 9, what: 'too few trees', mut: (m) => { m.trees.length = MIN_TREES - 1; } },
+    { rule: 9, what: 'a tree on sand', mut: (m) => { const i = m.ground.indexOf(2); m.trees[0].x = (i % W) + 0.5; m.trees[0].y = ((i / W) | 0) + 0.5; } },
     { rule: 9, what: 'no trees near the rival', mut: (m) => { m.trees = m.trees.filter((t) => Math.hypot(t.x - r.x, t.y - r.y) > 12); } },
-    { rule: 9, what: 'too few rocks', mut: (m) => { m.rocks.length = 19; } },
+    { rule: 9, what: 'too few rocks', mut: (m) => { m.rocks.length = MIN_ROCKS - 1; } },
     { rule: 10, what: 'creature start in the sea', mut: (m) => { m.sites.creatureStart = { x: 1, y: 1 }; } },
   ];
   const missed = [];

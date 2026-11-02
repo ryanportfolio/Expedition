@@ -1,13 +1,16 @@
 // World model: tile grid (height, ground) plus an entity store with a uniform spatial grid.
 // Heights are stored per tile and sampled at tile centers: heightAt(x, y) blends the four tile
 // centers around (x, y) bilinearly (edges clamp). Move entities with world.move so the spatial
-// grid stays correct.
+// grid stays correct. Entities are also indexed by kind (an entity's kind never changes after
+// spawn), so query({ kind }) with no circle walks that kind alone: with hundreds of villagers and
+// thousands of trees on the island of step 2, a full scan per call was a large share of the tick.
 
 const CELL = 4; // spatial grid cell size in tiles
 
 export function createWorld({ w = 64, h = 64 } = {}) {
   let nextId = 1;
   const entities = new Map();
+  const byKind = new Map(); // kind -> Set of its entities, in spawn (ascending id) order
   let grid = [];
   let gw = 0, gh = 0;
 
@@ -34,6 +37,7 @@ export function createWorld({ w = 64, h = 64 } = {}) {
       world.rocks = (map.rocks ?? []).map((r) => ({ ...r }));
       world.sites = structuredClone(map.sites ?? {});
       entities.clear();
+      byKind.clear();
       resetGrid();
       return world;
     },
@@ -63,6 +67,9 @@ export function createWorld({ w = 64, h = 64 } = {}) {
       const e = { x: 0, y: 0, ...props, id: nextId++, kind };
       if (e.z === undefined) e.z = world.heightAt(e.x, e.y);
       entities.set(e.id, e);
+      let set = byKind.get(kind);
+      if (!set) byKind.set(kind, (set = new Set()));
+      set.add(e);
       e._cell = cellIndex(e.x, e.y);
       grid[e._cell].add(e);
       return e;
@@ -72,6 +79,7 @@ export function createWorld({ w = 64, h = 64 } = {}) {
       if (!e) return false;
       grid[e._cell].delete(e);
       entities.delete(id);
+      byKind.get(e.kind)?.delete(e);
       return true;
     },
     get(id) { return entities.get(id); },
@@ -87,6 +95,7 @@ export function createWorld({ w = 64, h = 64 } = {}) {
       const test = (e) => (kind === undefined || e.kind === kind) &&
         (r === undefined || (e.x - x) ** 2 + (e.y - y) ** 2 <= r * r);
       if (r === undefined) {
+        if (kind !== undefined) return [...(byKind.get(kind) ?? [])];
         for (const e of entities.values()) if (test(e)) out.push(e);
         return out;
       }

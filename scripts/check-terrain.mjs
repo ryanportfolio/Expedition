@@ -19,6 +19,7 @@ import { buildIsland } from '../src/world/island.js';
 import { worldToScreen } from '../src/world/iso.js';
 import { buildTerrainCache, PART, surfaceHeights, WATER_LO } from '../src/terrain/cache.js';
 import { drawTerrain } from '../src/terrain/pass.js';
+import { spriteInView } from '../src/render/renderer.js';
 import * as terrainSystem from '../src/systems/terrain.js';
 import * as painters from '../src/art/painters/terrain.js';
 import { registerPainters, getSprite, placeholderSprite } from '../src/art/registry.js';
@@ -47,7 +48,7 @@ ok(c1.w === c2.w && c1.h === c2.h && c1.data.length === c2.data.length, `cache s
 let diff = 0;
 for (let i = 0; i < c1.data.length; i++) if (c1.data[i] !== c2.data[i]) diff++;
 ok(diff === 0, `island cache is byte-identical across builds (${diff} differing bytes)`);
-ok(c1.w === (64 + 64) * 16 && c1.ox === -64 * 16, `cache covers the whole map in world pixels (${c1.w}x${c1.h}, origin ${c1.ox},${c1.oy})`);
+ok(c1.w === (island.w + island.h) * 16 && c1.ox === -island.h * 16, `cache covers the whole map in world pixels (${c1.w}x${c1.h}, origin ${c1.ox},${c1.oy})`);
 const filledIdx = c1.data.reduce((n, v) => n + (v ? 1 : 0), 0);
 ok(filledIdx > c1.w * c1.h * 0.45, `cache is mostly drawn (${filledIdx} of ${c1.w * c1.h} pixels)`);
 console.log(`island cache ${c1.w}x${c1.h} fnv ${fnv(c1.data)}`);
@@ -191,7 +192,7 @@ function faceCounts(world, cache) {
 {
   const game = createGame({ seed: 1 });
   const { world } = game;
-  ok(world.w === 64 && world.sites.village && world.rocks.length === island.rocks.length, 'createGame(): terrain system loaded the island');
+  ok(world.w === island.w && world.sites.village && world.rocks.length === island.rocks.length, 'createGame(): terrain system loaded the island');
   const rocks = () => world.query({ kind: 'rock' });
   ok(rocks().length === world.rocks.length && world.rocks.length >= 20, `one rock entity per map rock (${rocks().length} of ${world.rocks.length})`);
   const r0 = rocks()[0];
@@ -200,17 +201,17 @@ function faceCounts(world, cache) {
   terrainSystem.create(game);
   terrainSystem.create(game);
   ok(rocks().length === world.rocks.length, `creating the terrain system again does not duplicate rocks (${rocks().length})`);
-  ok(world.w === 64 && world.query({ kind: 'rock' }).length === world.rocks.length, 'second create keeps the loaded map');
+  ok(world.w === island.w && world.query({ kind: 'rock' }).length === world.rocks.length, 'second create keeps the loaded map');
 
   const sys = game.systems.terrain;
   const a = sys.cache;
-  ok(a.mapW === 64 && sys.stats.builds === 1, `cache built for the island (${a.w}x${a.h})`);
+  ok(a.mapW === island.w && sys.stats.builds === 1, `cache built for the island (${a.w}x${a.h})`);
   ok(sys.cache === a && sys.stats.builds === 1, 'cache reused while the map is unchanged');
   world.loadMap(makeTestMap());
   const b = sys.cache;
   ok(b !== a && b.mapW === 16 && b.w === 32 * 16 && sys.stats.builds === 2, `cache rebuilt for a new map (${b.w}x${b.h})`);
   world.loadMap(buildIsland());
-  ok(sys.cache.mapW === 64 && sys.stats.builds === 3, 'cache rebuilt when the island is loaded again');
+  ok(sys.cache.mapW === island.w && sys.stats.builds === 3, 'cache rebuilt when the island is loaded again');
 
   // A full 640 x 360 render through the real renderer: the pass runs and fills the view.
   game.display.setDevice(1920, 1080, 1);
@@ -254,10 +255,15 @@ function faceCounts(world, cache) {
   renderer.render();
   ok(rocks() === N, `more ticks and a draw do not duplicate them (${rocks()})`);
   world.loadMap(buildIsland());
+  const r0 = world.rocks[0];
+  game.camera.centerOn(r0.x, r0.y, world.heightAt(r0.x, r0.y)); // a rock in view
   renderer.render(); // a draw alone, no tick
   ok(rocks() === N, `reload again, draw only: ${rocks()} rock entities`);
+  // the draw list holds the entities whose sprites overlap the view (spriteInView in renderer.js)
+  const v = renderer.view, cam = { x: Math.round(game.camera.x), y: Math.round(game.camera.y) };
+  const inView = world.query({ kind: 'rock' }).filter((e) => spriteInView(e, cam.x, cam.y, v.w, v.h)).length;
   const drawn = renderer.list.items.filter((it) => it.kind === 'rock').length;
-  ok(drawn === N, `that first frame after the reload already draws them (${drawn} rocks in the draw list)`);
+  ok(inView > 0 && drawn === inView, `that first frame after the reload already draws them (${drawn} rocks in the draw list, ${inView} in view)`);
   const r = world.query({ kind: 'rock' })[0];
   ok(r.grabbable === true && r.hp === 1 && r.sprite === getSprite('rock', { size: r.size }) && Math.abs(r.z - world.heightAt(r.x, r.y)) < 1e-9, 'respawned rocks have the create-time fields and sit on the terrain');
   game.tick(1 / 30);

@@ -1,8 +1,10 @@
-// Frame-time check in the worst-case scene (src/dev/scenarios/perf.js: full village, the creature and
-// all four miracles alive), on the real-time loop.
+// Frame-time check in the worst-case scene (src/dev/scenarios/perf.js: a town of hundreds of
+// villagers round each village, the creature and all four miracles alive), on the real-time loop.
 //
 //   node scripts/perf-check.mjs [--budget <ms>] [--warmup <s>] [--seconds <s>] [--window <WxH>] [--out <dir>]
-//                               [--scenario <name>]
+//                               [--scenario <name>] [--town <n>] [--rival <n>]
+//
+// --town and --rival set the villagers in the player and rival towns (default: TOWN in perf.js).
 //
 // Builds with Vite, serves dist from node on an ephemeral port, opens headed Chrome through
 // launchPlacedChrome() (off screen, muted; never headless, never minimized, so rAF runs at the
@@ -32,7 +34,7 @@ import { serveStatic } from './lib/static-server.mjs';
 import { launchPlacedChrome } from './lib/launch-chrome.mjs';
 
 function parseArgs(argv) {
-  const o = { budget: 16.7, warmup: 5, seconds: 20, window: '1920x1080', out: null, scenario: 'perf' };
+  const o = { budget: 16.7, warmup: 5, seconds: 20, window: '1920x1080', out: null, scenario: 'perf', town: null, rival: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => {
@@ -46,10 +48,12 @@ function parseArgs(argv) {
     else if (a === '--window') o.window = v();
     else if (a === '--out') o.out = v();
     else if (a === '--scenario') o.scenario = v();
+    else if (a === '--town' || a === '--rival') o[a.slice(2)] = Number(v());
     else throw new Error(`unknown argument ${a}`);
   }
   for (const k of ['budget', 'seconds']) if (!(o[k] > 0)) throw new Error(`--${k} must be a positive number`);
   if (!(o.warmup >= 0)) throw new Error('--warmup must be 0 or more');
+  for (const k of ['town', 'rival']) if (o[k] !== null && !(Number.isInteger(o[k]) && o[k] >= 0)) throw new Error(`--${k} must be a whole number`);
   const m = /^(\d+)x(\d+)$/.exec(o.window);
   if (!m) throw new Error(`--window must be WxH, got ${o.window}`);
   if (!/^[\w-]+$/.test(o.scenario)) throw new Error(`--scenario must be a scenario file name, got ${o.scenario}`);
@@ -132,7 +136,8 @@ async function main() {
 
     // ---- the scene
     const t0 = Date.now();
-    await page.goto(`${server.url}?scenario=${o.scenario}&seed=1`);
+    const sizes = ['town', 'rival'].filter((k) => o[k] !== null).map((k) => `&${k}=${o[k]}`).join('');
+    await page.goto(`${server.url}?scenario=${o.scenario}&seed=1${sizes}`);
     result.scenario = o.scenario;
     await page.waitForFunction(() => window.__perf?.ready === true || window.__scenario?.error, null, { timeout: 180000, polling: 100 });
     const scen = await page.evaluate(() => ({ error: window.__scenario?.error, asserts: window.__scenario?.asserts, logs: window.__scenario?.logs, view: window.__scenario?.view, dpr: devicePixelRatio, inner: [innerWidth, innerHeight] }));
