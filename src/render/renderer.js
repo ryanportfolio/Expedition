@@ -4,7 +4,7 @@
 //   3. systems' draw(ctx) in spec order: they push world items into ctx.list or queue overlays
 //   4. world entities that carry a `sprite` are pushed into the draw list
 //   5. fx back layer
-//   6. draw list, sorted by depth key (x + y, then z, then id)
+//   6. draw list, sorted by depth key (x + y, or an item's sortDepth; then z, then id)
 //   7. fx front layer
 //   8. overlays (screen space, registration order), then present to the canvas
 import { createViewBuffer, rgba } from './buffer.js';

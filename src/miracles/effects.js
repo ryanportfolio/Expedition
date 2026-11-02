@@ -4,6 +4,9 @@
 import { TUNING } from './tuning.js';
 import { FX, PX_PER_TILE } from './fx.js';
 
+/** Entity kinds a heal restores hp to (see apply.heal). */
+const HEALS = new Set(['villager', 'creature', 'building', 'tree']);
+
 export function createEffects(game, { getFire }) {
   let time = 0;
   const queue = []; // { at, fn }, run in insertion order once due
@@ -39,8 +42,20 @@ export function createEffects(game, { getFire }) {
       const H = TUNING.heal;
       spawn(FX.heal(Math.round(H.radius * PX_PER_TILE), seed()), x, y);
       later(H.delay, () => {
+        // Heal mends buildings and trees as well as the living (round 46, user decision "Repair
+        // buildings"). Villagers spawn healthy, can't burn and die outright, and the creature is
+        // back at full hp every tick, so a heal that touched only them changed nothing in play.
+        // Buildings and trees are what play leaves hurt: scorched by a fire that rain put out, struck
+        // by lightning, hit by a thrown rock or the creature's smash.
+        // - Only hp > 0 is mended. A wreck (hp 0) is already on its village's lost list and waits
+        //   to be cleared and rebuilt; raising its hp would leave a wreck the village no longer
+        //   wrecks or rebuilds. The same rule keeps the dead dead.
+        // - Blueprints and building sites are mended too: lightning and rocks hurt them like any
+        //   building, and hp is all heal changes.
+        // - A burning building or tree is mended but keeps burning: heal buys time, rain puts fires
+        //   out. Village and fire damage rules are unchanged.
         for (const e of game.world.query({ x, y, r: H.radius })) {
-          if ((e.kind === 'villager' || e.kind === 'creature') && typeof e.hp === 'number' && e.hp > 0) {
+          if (HEALS.has(e.kind) && typeof e.hp === 'number' && e.hp > 0) {
             e.hp = Math.min(1, e.hp + H.amount);
           }
         }

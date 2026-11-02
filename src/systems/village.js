@@ -26,7 +26,13 @@ export function create(game) {
           e.sprite = getSprite('villager', { job: e.job, pose: e.pose, frame: e.frame, facing: e.facing, owner: e.owner });
         } else if (e.kind === 'building' && e.madeBy === 'village') {
           const opts = { owner: e.owner, stage: e.stage };
-          if (e.type === 'field') opts.growth = Math.floor(e.growth * 4) / 4;
+          if (e.type === 'field') {
+            opts.growth = Math.floor(e.growth * 4) / 4;
+            // A field is a flat footprint, not an upright sprite: sort it by its back corner so the
+            // villagers working on it draw over it (depthKey in src/world/iso.js has the why). Just
+            // under the corner, so a villager standing exactly on it still draws on top.
+            e.sortDepth = e.tx + e.ty - 1e-3;
+          }
           e.sprite = getSprite(e.type, opts);
         } else if (e.madeBy === 'village' && !e.sprite) {
           e.sprite = e.kind === 'tree' ? getSprite('tree', { species: e.species }) : getSprite(e.kind);

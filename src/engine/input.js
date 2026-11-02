@@ -8,6 +8,7 @@
 
 const VELOCITY_WINDOW_MS = 100;
 const DRAG_THRESHOLD = 3; // view px
+const BUTTONS = [[1, 0], [2, 2], [4, 1], [8, 3], [16, 4]]; // [buttons bit, button number]
 
 export function createInput(events) {
   const samples = [];
@@ -57,7 +58,22 @@ export function createInput(events) {
       events.emit('pointer-up', payload(button));
     },
     leave() { input.pointer.inside = false; },
+    /**
+     * Ends every held press without a gesture: a window blur, a lost pointer capture or a cancelled
+     * pointer. The velocity samples are dropped first, so each pointer-up reports no speed and
+     * the hand drops what it carries where it is. Before round 46 these went through the ordinary
+     * release, which kept the speed of the last moves: alt-tabbing out mid-carry threw the villager
+     * (and a fast one died on landing).
+     */
+    cancel() {
+      const p = input.pointer;
+      samples.length = 0;
+      p.vsx = p.vsy = p.vx = p.vy = 0;
+      for (const [b, n] of BUTTONS) if (p.buttons & b) input.up(n);
+    },
     addWheel(dy) {
+      // the camera keeps a remainder under one zoom step; turning the wheel the other way drops it
+      if (dy * input.wheel < 0) input.wheel = 0;
       input.wheel += dy;
       events.emit('wheel', { dy });
     },
@@ -76,24 +92,62 @@ export function createInput(events) {
     /** Synthetic API for scenarios: screen coordinates are view px. */
     synth: null,
 
-    /** Browser only: wire DOM events. toView(clientX, clientY) -> { sx, sy } in view px. */
+    /**
+     * Browser only: wire DOM events. toView(clientX, clientY) -> { sx, sy } in view px.
+     *
+     * Pointer events are read on the window, not the canvas. The canvas covers view * scale device
+     * px, so when the window size is not a multiple of the scale (1366, 1600, 2560 wide at scale 3)
+     * a strip under one game pixel wide at the right and bottom shows the page instead. A mouse
+     * pushed against the window edge sits in that strip: listening on the canvas, it fired
+     * pointerleave there and edge panning stopped (round 42). Positions are clamped to the view, so
+     * the strip counts as the last column or row, and the pointer leaves only when it leaves the
+     * window (pointerout with no element to go to).
+     *
+     * Buttons follow e.buttons on every pointer event. Pointer events fire pointerdown only for the
+     * first button pressed and pointerup only for the last one released; a second button pressed or
+     * released while another is held arrives as a pointermove (Chrome). Reading only e.button on
+     * down/up lost those changes, and the hand stayed holding after both buttons were up (round 42).
+     * Every bit that differs from the tracked mask becomes one up() or down() call.
+     *
+     * A lost pointer capture, a cancelled pointer or a window blur ends every held press through
+     * cancel(), with no pointer speed (round 46). A blur also takes the pointer out of the window:
+     * the mouse may be over another window by then, and a pointer left inside kept edge panning
+     * from its last position. A lost capture does not: it also fires after every ordinary
+     * pointerup, when the pointer is still over the game.
+     */
     attach(canvas, win, toView) {
-      const at = (e) => toView(e.clientX, e.clientY);
-      canvas.addEventListener('pointermove', (e) => { const v = at(e); input.move(v.sx, v.sy); });
-      canvas.addEventListener('pointerdown', (e) => {
-        canvas.setPointerCapture?.(e.pointerId);
+      const at = (e) => {
+        const v = toView(e.clientX, e.clientY);
+        const w = canvas.width || 1, h = canvas.height || 1; // the canvas buffer is the view
+        return { sx: Math.min(Math.max(v.sx, 0), w - 1), sy: Math.min(Math.max(v.sy, 0), h - 1) };
+      };
+      const sync = (now) => {
+        const was = input.pointer.buttons;
+        for (const [b, n] of BUTTONS) if ((was & b) && !(now & b)) input.up(n); // releases first
+        for (const [b, n] of BUTTONS) if (!(was & b) && (now & b)) input.down(n);
+      };
+      const pointer = (e) => {
         const v = at(e);
         input.move(v.sx, v.sy);
-        input.down(e.button);
-        if (e.button === 1) e.preventDefault();
+        sync(e.buttons ?? 0);
+      };
+      win.addEventListener('pointermove', pointer);
+      win.addEventListener('pointerdown', (e) => {
+        canvas.setPointerCapture?.(e.pointerId);
+        pointer(e);
+        if (e.button === 1) e.preventDefault(); // no autoscroll on the middle button
       });
-      canvas.addEventListener('pointerup', (e) => { const v = at(e); input.move(v.sx, v.sy); input.up(e.button); });
-      canvas.addEventListener('pointerleave', () => input.leave());
-      canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-      canvas.addEventListener('wheel', (e) => { e.preventDefault(); input.addWheel(e.deltaY); }, { passive: false });
+      win.addEventListener('pointerup', pointer);
+      win.addEventListener('pointercancel', () => input.cancel());
+      canvas.addEventListener('lostpointercapture', () => input.cancel());
+      // a middle press added to a held button fires no pointerdown, only the mouse event
+      win.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
+      win.addEventListener('pointerout', (e) => { if (!e.relatedTarget) input.leave(); });
+      win.addEventListener('contextmenu', (e) => e.preventDefault());
+      win.addEventListener('wheel', (e) => { e.preventDefault(); input.addWheel(e.deltaY); }, { passive: false });
       win.addEventListener('keydown', (e) => input.keyDown(e.code));
       win.addEventListener('keyup', (e) => input.keyUp(e.code));
-      win.addEventListener('blur', () => { for (const k of [...input.keys]) input.keyUp(k); });
+      win.addEventListener('blur', () => { for (const k of [...input.keys]) input.keyUp(k); input.cancel(); input.leave(); });
     },
   };
 
@@ -105,6 +159,7 @@ export function createInput(events) {
     keyDown: (code) => input.keyDown(code),
     keyUp: (code) => input.keyUp(code),
     leave: () => input.leave(),
+    cancel: () => input.cancel(),
   };
 
   function bit(button) { return button === 0 ? 1 : button === 1 ? 4 : button === 2 ? 2 : 1 << button; }

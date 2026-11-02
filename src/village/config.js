@@ -36,7 +36,7 @@ export const VILLAGE = {
   birthReserve: 20, // grain kept back before births
   rivalPlanInterval: 120, // rival places a new blueprint at most this often
   influenceR: 10, // blueprints within this of the own temple centre
-  buildingInfluenceR: 5, // or within this of an existing own building centre
+  buildingInfluenceR: 5, // or within this of a finished own building centre (blueprints do not count)
   dyingTime: 1.5, // seconds a dead villager lies before removal
   // Recovery after fire and other losses (both villages).
   clearTime: 6, // seconds of builder work to clear one wreck away
@@ -50,10 +50,9 @@ export const VILLAGE = {
   rebuildOrder: ['storehouse', 'woodpile', 'field', 'house'], // which lost buildings come back first: stores, then wood, food, homes
   oneOf: ['storehouse', 'woodpile'], // stores: a lost one is re-placed at once (beside its wreck if need be) when the village has none standing or going up, and not at all when it has
   wreckWait: 30, // seconds a lost building waits for builders to clear its wreck before it is re-placed beside it
-  // Temples (player and rival) are stone: a creature smash or a thrown object chips them down to
-  // this hp at most and never wrecks them (src/systems/creature.js keeps its smash to it; the village
-  // undoes a thrown object's hit below it). Fire spares them through its own damage table; lightning
-  // and other hp loss still count.
+  // Temples (player and rival) are stone: no hp write takes them below this (fire, lightning, a
+  // thrown object, a creature smash; stoneHp in sim.js floors every write since round 43), so they
+  // are never wrecked and worship resumes once a fire on them is out.
   templeMinHp: 0.2,
   settlerMinPop: 3, // below this many villagers, settlers arrive at a standing or ruined temple
   settlerInterval: 15, // seconds between settlers while the village is that small

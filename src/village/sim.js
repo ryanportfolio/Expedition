@@ -18,9 +18,9 @@
 // its type, so nothing is rebuilt twice, and the player may place over a re-placed
 // blueprint that has no wood in it yet (it goes back on the list). Builders and woodcutters work one
 // focus site at a time (focus()). With no usable storehouse, no one is sent to farm, carried grain
-// is set down and ripe crops wait in the fields. Temples never fall to a thrown object or the
-// creature's smash (templeMinHp). An empty blueprint can't burn, and one knocked to hp 0 leaves no
-// wreck: it goes on the lost list and its plot is removed at once. While a village with a temple has
+// is set down and ripe crops wait in the fields. Temples never fall: every hp write on one stops at
+// templeMinHp (stoneHp), so worship resumes once a fire on it is out. An empty blueprint can't burn,
+// and one knocked to hp 0 leaves no wreck: it goes on the lost list and its plot is removed at once. While a village with a temple has
 // fewer than settlerMinPop villagers, a settler arrives at the temple every settlerInterval seconds;
 // births then take over as houses and grain return.
 import { VILLAGE as T, KINDS, PLACEABLE, START_LAYOUT, RIVAL_PLAN } from './config.js';
@@ -87,7 +87,8 @@ export function createVillageSim(game) {
 
   // ---- placement -------------------------------------------------------------------------------
 
-  /** A wreck of ours that builders clear and a new blueprint may replace. A wrecked temple stays: it is the worship site. */
+  /** A wreck of ours that builders clear and a new blueprint may replace. Never the temple, the worship
+   * site (since round 43 stoneHp keeps it from wrecking at all). */
   const isWreck = (b) => b.stage === 'wrecked' && b.madeBy === 'village' && b.type !== 'temple';
   /** A re-placed blueprint `owner` may build over: placed by recovery, no wood delivered yet, not alight. */
   const isOpenAuto = (b, owner) => b.auto === true && b.owner === owner && b.stage === 'blueprint' && b.hp > 0 &&
@@ -122,7 +123,10 @@ export function createVillageSim(game) {
       const v = villages[owner];
       const temple = v?.temple;
       const inTemple = temple && temple.hp > 0 && Math.hypot(temple.x - cx, temple.y - cy) <= T.influenceR;
-      const nearB = own(owner).some((b) => b.stage !== 'wrecked' && Math.hypot(b.x - cx, b.y - cy) <= T.buildingInfluenceR);
+      // Only finished buildings extend the influence. Round 43: any building not wrecked counted, so
+      // unbuilt blueprints placed one from the next chained across the island (6 woodpile blueprints
+      // reached 2.8 tiles from the rival centre) without anything being built.
+      const nearB = own(owner).some((b) => b.stage === 'done' && Math.hypot(b.x - cx, b.y - cy) <= T.buildingInfluenceR);
       if (!inTemple && !nearB) return { ok: false, reason: 'out of range (outside the village influence)' };
     }
     for (const b of world.query({ kind: 'building' })) {
@@ -155,22 +159,23 @@ export function createVillageSim(game) {
     return b;
   }
 
-  /** Temples are stone: an hp write that comes from a thrown object's hit (a hand flight that has
-   * hit this temple; the hand marks the hit before it writes hp) stops at templeMinHp, so throws chip
-   * a temple but never wreck it. Other writes (lightning, a test setting hp) stand, as long as no
-   * flight that hit the temple is still in the air. The creature keeps its smash to the floor itself. */
+  /** Temples are stone: every hp write on a temple stops at templeMinHp, whoever makes it (fire,
+   * lightning, a thrown object, the creature's smash, a test), so a temple is chipped and scorched
+   * but never reaches hp 0 and is never wrecked. Round 43: before, only thrown-object hits were
+   * floored here (the creature floored its own smash); fire and lightning took a temple to 0, the
+   * update below wrecked it, and nothing repairs a temple, so worship (which needs a usable temple)
+   * ended for good after one lightning bolt, or one fire on a temple a creature smash had chipped
+   * to 0.5. Flooring in this one setter covers every writer, present and future; a floored temple
+   * is usable again once its fire is out (fire.js lets a fire on an entity above hp 0 burn out after
+   * burnTime). */
   function stoneHp(b) {
     let hp = b.hp;
     Object.defineProperty(b, 'hp', {
       enumerable: true,
       configurable: true,
       get: () => hp,
-      set: (v) => { hp = v < T.templeMinHp && hitByThrow(b) ? Math.max(v, Math.min(hp, T.templeMinHp)) : v; },
+      set: (v) => { hp = Math.max(v, T.templeMinHp); },
     });
-  }
-  function hitByThrow(b) {
-    for (const f of game.systems.hand?.state?.flights?.values() ?? []) if (f.hit?.has(b.id)) return true;
-    return false;
   }
 
   function clearTrees(ox, oy, fw, fh) {
@@ -1093,6 +1098,11 @@ export function createVillageSim(game) {
     if (!mapRef) return;
     const e = world.get(p?.entityId);
     if (e?.kind === 'villager' && e.job !== undefined) { dropCarry(e); e.path = null; e.work = null; }
+    // An item the hand takes out of a villager's arms is no longer carried. Round 43: carriedBy kept
+    // naming the old carrier, and villagers (looseNear, pickUp) and the creature skip any item with
+    // carriedBy set, so wood or grain grabbed from a carrier was never picked up again.
+    const by = e?.carriedBy != null ? world.get(e.carriedBy) : null;
+    if (by?.kind === 'villager') { if (by.carry === e.id) dropCarry(by); e.carriedBy = null; }
   });
   events.on('release', (p) => {
     if (!mapRef) return;

@@ -443,6 +443,28 @@ check('10d stroking lifts the forbid everywhere', () => {
   return `${strokes} stroke(s): min ${f3(minRow(b, 'throw:villager'))} > ${T}; chosen ${out.join(', ')}; table flag cleared`;
 });
 
+// Round 43: completeAction(key, satisfies, now) moves the act's credit time to `now`, for acts with
+// more than one stage (a haul is recorded at the pickup and finished at the delivery). Only the
+// newest entry for that key is re-stamped; an action recorded before it keeps its own time. Without
+// `now` the credit time stays at recordAction's.
+check('11 credit time at completion', () => {
+  const run = (now) => {
+    const b = createBrain({ rng: mulberry32(1) });
+    b.recordAction('idle:none', 0);
+    b.recordAction('haul:wood', 1);
+    b.completeAction('haul:wood', undefined, now);
+    return b.feedback('stroke', 1, 9);
+  };
+  const ages = (r) => Object.fromEntries(r.deltas.map((d) => [d.key, d.age]));
+  const late = ages(run(9)), plain = ages(run());
+  assert(late['haul:wood'] === 0 && late['idle:none'] === 9, `re-stamped at 9: ages ${JSON.stringify(late)}, want haul:wood 0, idle:none 9`);
+  assert(plain['haul:wood'] === 8 && plain['idle:none'] === 9, `no now: ages ${JSON.stringify(plain)}, want haul:wood 8, idle:none 9`);
+  let threw = false;
+  try { createBrain({ rng: mulberry32(1) }).completeAction('haul:wood', undefined, NaN); } catch { threw = true; }
+  assert(threw, 'a non-finite now must throw');
+  return `haul:wood credit age ${late['haul:wood']} s with now, ${plain['haul:wood']} s without; idle:none ${late['idle:none']} s either way`;
+});
+
 const failed = results.filter((r) => !r.ok).length;
 console.log(`${results.length - failed}/${results.length} checks passed`);
 process.exitCode = failed ? 1 : 0;

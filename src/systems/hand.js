@@ -167,6 +167,11 @@ export function create(game) {
       const lethal = speed > HAND.lethalSpeed;
       const kills = e.kind === 'villager' && (e.hp ?? 1) > 0 && (lethal || water);
       if (kills) e.hp = 0;
+      // Put the entity on the contact point before anyone hears of the landing: listeners read the
+      // entity, not the payload (the orbs cast where the orb is, the village handles the landed
+      // villager where it lies). The world otherwise still holds the last tick's position, up to
+      // one tick of flight (0.4 tiles at throw speed) short of the contact.
+      world.move(e, f.x, f.y, f.z);
       events.emit('landed', { entityId: e.id, speed, kind: e.kind, x: f.x, y: f.y, z: f.z, water });
       if (kills) act(lethal || f.thrown ? 'throw' : 'drop', 'villager', HAND.weights.kill, f.x, f.y);
       if (world.get(e.id) !== e) { hand.flights.delete(e.id); return; } // a listener removed it (an orb cast)

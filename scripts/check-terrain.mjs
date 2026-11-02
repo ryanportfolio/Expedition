@@ -2,12 +2,14 @@
 //   node scripts/check-terrain.mjs
 // Checks: the cached index buffer is deterministic for the island; every tile's top diamond sits at
 // worldToScreen of its center; side faces appear only where a front neighbor is lower (and do appear
-// there on an unoccluded test map); rock entities spawn once, and again per map after world.loadMap
+// there on an unoccluded test map); the pointer pick resolves every drawn pixel to the tile that drew
+// it and every undrawn pixel to nothing (island and test map); rock entities spawn once, and again per map after world.loadMap
 // (never duplicated, in the draw list on the first frame after a reload, none for a rock-less map,
 // exactly its own for a map with 2 rocks); liveRocks gives the map records only until the rocks
 // are entities, then the entities alone (moved, removed, all gone, a scenario's own rock); the cache rebuilds on map change; the
 // tree, stump and rock painters give non-empty, deterministic sprites anchored at their base;
-// update() touches no DOM; no Math.random in terrain code.
+// water glints one cell at a time, never all at once; update() touches no DOM; no Math.random in
+// terrain code.
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +17,7 @@ import { createGame } from '../src/game.js';
 import { createWorld } from '../src/world/world.js';
 import { buildIsland } from '../src/world/island.js';
 import { worldToScreen } from '../src/world/iso.js';
-import { buildTerrainCache, PART, surfaceHeights } from '../src/terrain/cache.js';
+import { buildTerrainCache, PART, surfaceHeights, WATER_LO } from '../src/terrain/cache.js';
 import { drawTerrain } from '../src/terrain/pass.js';
 import * as terrainSystem from '../src/systems/terrain.js';
 import * as painters from '../src/art/painters/terrain.js';
@@ -139,6 +141,50 @@ function faceCounts(world, cache) {
   ok(others === 0, `flat tiles draw no side faces (${others} pixels)`);
   // A tile behind the raised one (lower) draws no face toward it.
   ok(left[7] === 0 && right[11] === 0, 'tiles behind a higher tile draw no face');
+}
+
+// ------------------------------------------------------------------ the pointer picks the tile drawn under it (round 42)
+// Every pixel the cache draws, through the game's own pointer pick (input.toWorld, the path every
+// mouse move takes), must resolve to the tile that drew it: Math.floor of the picked x, y (what the
+// build ghost and the hand read) and the returned tx, ty. Pixels the cache leaves empty must pick
+// nothing. The camera sits at world pixel (0, 0) so a view pixel is the world pixel. Before round 42
+// the pick ran on world.heightAt (smooth between tile centers) at the pixel's corner: 46% of the
+// island's top pixels (most of them water, picked on the sea bed) and 10.7% of its land top pixels,
+// even sampled at pixel centers, picked another tile.
+{
+  const pickCase = (label, map) => {
+    const game = createGame({ seed: 1 });
+    if (map) game.world.loadMap(map);
+    const c = buildTerrainCache(game.world, { owner: true });
+    game.camera.x = 0; game.camera.y = 0;
+    const n = [0, 0, 0, 0], bad = [0, 0, 0, 0], first = [];
+    let ghost = 0;
+    for (let y = 0; y < c.h; y++) for (let x = 0; x < c.w; x++) {
+      const o = c.owner[y * c.w + x];
+      const p = game.input.toWorld(x + c.ox, y + c.oy);
+      if (!o) { if (p) { ghost++; if (first.length < 3) first.push(`empty px (${x + c.ox}, ${y + c.oy}) picked ${p.tx},${p.ty}`); } continue; }
+      const part = o & 3, ti = (o >> 2) - 1, tx = ti % game.world.w, ty = (ti - tx) / game.world.w;
+      n[part]++;
+      if (!p || Math.floor(p.x) !== tx || Math.floor(p.y) !== ty || p.tx !== tx || p.ty !== ty) {
+        bad[part]++;
+        if (first.length < 3) first.push(`px (${x + c.ox}, ${y + c.oy}) drawn by ${tx},${ty} ${['', 'top', 'left face', 'right face'][part]} picked ${p ? `${p.x.toFixed(3)},${p.y.toFixed(3)} z ${p.z.toFixed(3)}` : 'nothing'}`);
+      }
+    }
+    ok(n[1] > 0 && n[2] > 0 && n[3] > 0, `${label}: the map has top and both side-face pixels (${n.slice(1).join(', ')})`);
+    ok(bad[1] + bad[2] + bad[3] === 0 && ghost === 0, `${label}: every drawn pixel picks the tile that drew it (wrong: top ${bad[1]} of ${n[1]}, left ${bad[2]} of ${n[2]}, right ${bad[3]} of ${n[3]}; undrawn pixels that picked a tile: ${ghost}) ${first.join('; ')}`);
+    return game;
+  };
+  pickCase('island', null);
+  // the engine test map: water below sea level (drawn flat at sea level), a plateau, and land on the
+  // map's front edges, where the cache draws no wall
+  const game = pickCase('test map', makeTestMap());
+  // an in-place height edit plus terrain.invalidate(): the pick follows the new height
+  const { world } = game, i = 2 * world.w + 2;
+  world.height[i] = 9;
+  game.systems.terrain.invalidate();
+  const top = worldToScreen(2.5, 2.5, 9);
+  const p = game.input.toWorld(Math.floor(top.sx), Math.floor(top.sy));
+  ok(p && p.tx === 2 && p.ty === 2 && p.z === 9, `after an in-place edit and terrain.invalidate() the pick finds the raised tile top (${JSON.stringify(p)})`);
 }
 
 // ------------------------------------------------------------------ system: map load, rocks, cache rebuild, timing
@@ -321,6 +367,30 @@ function faceCounts(world, cache) {
     ...readdirSync(join(ROOT, 'src/terrain')).map((f) => `src/terrain/${f}`)];
   const bad = files.filter((f) => /Math\.random|document\.|window\./.test(readFileSync(join(ROOT, f), 'utf8').replace(/\/\/.*$/gm, '')));
   ok(bad.length === 0, `no Math.random or DOM access in terrain sources (${bad.join(', ') || 'none'})`);
+}
+
+// Water glint (round 46): a glinting water cell lights for one step in 64 and most cells never
+// glint. The never-glint cells held 255, and (255 + 1) & 63 === 0, so all of them (about 5/8 of the
+// sea) lit together at step 1: a flash across the water every 64 / 5 = 12.8 s. A flat 128 x 64 water
+// buffer covers every one of the 64 x 64 glint cells (each cell is 2 px across). Over one cycle no
+// pixel may light twice, about 3/8 of them light once, and no step lights more than 1/16 of them.
+{
+  const W = 128, H = 64, base = WATER_LO + 2; // shade 2: a shade that glints
+  const cache = { data: new Uint8Array(W * H).fill(base), w: W, h: H, ox: 0, oy: 0 };
+  const lut = new Uint32Array(256);
+  lut[base] = 1; lut[base + 2] = 2; // 2 = a glinting pixel
+  const buf = new Uint32Array(W * H), times = new Uint8Array(W * H), perStep = [];
+  for (let s = 0; s < 64; s++) {
+    buf.fill(0);
+    drawTerrain({ buf, w: W, h: H, camX: 0, camY: 0, lut }, cache, (s + 0.5) / 5); // GLINT_RATE 5 steps/s
+    let n = 0;
+    for (let i = 0; i < buf.length; i++) if (buf[i] === 2) { n++; times[i]++; }
+    perStep.push(n);
+  }
+  const N = W * H, total = perStep.reduce((a, b) => a + b, 0), most = Math.max(...perStep);
+  ok(times.every((t) => t <= 1), `water glint: no pixel lights twice in one 64-step cycle (most ${Math.max(...times)})`);
+  ok(total >= 0.25 * N && total <= 0.5 * N, `water glint: about 3/8 of the water glints once per cycle (${total} of ${N} px)`);
+  ok(most <= N / 16, `water glint: no step lights the sea at once (most in one step ${most} of ${N} px, at step ${perStep.indexOf(most)})`);
 }
 
 console.log(`check-terrain: ${pass} passed, ${fails.length} failed`);

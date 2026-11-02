@@ -9,8 +9,10 @@
 // events teach the brain; a tether event sends it to a point where it stays for a while.
 // Untrained, it holds back from harm (tunables `harm`, `harmCooldown`): eat:villager, throw:villager
 // and smash:building come at most once per cooldown per victim kind, and grain beats villagers when
-// both are on offer, until a stroke teaches otherwise. Temples are only smashed down to
-// VILLAGE.templeMinHp.
+// both are on offer, until a stroke teaches otherwise. A temple is offered for a smash only while
+// one more smash leaves it at or above VILLAGE.templeMinHp (the village floors its hp there anyway).
+// A slap that forbids the act under way stops it (onFeedback). A multi-stage act (haul) takes its
+// credit time from its completion (complete()).
 //
 // Spawn: like the village, the system is inert until setup() is called after world.loadMap() with a
 // map that has sites.creatureStart; setup() spawns one creature there (a later loadMap clears it):
@@ -125,6 +127,12 @@ export function create(game) {
     obj.vx = vx; obj.vy = vy; obj.vz = vz;
     events.emit('release', { entityId: obj.id, kind: obj.kind, miracle: obj.miracle, x: obj.x, y: obj.y, z: obj.z, vx, vy, vz, by: 'creature' });
   }
+
+  // The hand catching something the creature threw takes it over at once (round 46). The `held`
+  // test in stepFlights alone missed a press and a release between two ticks: the hand's own
+  // flight started, `held` was false again by the next update, and both flights moved and landed
+  // the same object.
+  events.on('grab', ({ entityId }) => { flights.delete(entityId); });
 
   function stepFlights(dt) {
     const bounds = { w: world.w, h: world.h };
@@ -263,7 +271,14 @@ export function create(game) {
     let goal = c.goal;
     if (verb === 'wander') {
       const R = tether ? T.tetherRadius : T.wanderRadius;
-      const tx = Math.floor(cx + (game.rng.next() * 2 - 1) * R), ty = Math.floor(cy + (game.rng.next() * 2 - 1) * R);
+      let ox = (game.rng.next() * 2 - 1) * R, oy = (game.rng.next() * 2 - 1) * R;
+      // While tethered the target stays within tetherRadius of the point, as the tunable says: the two
+      // draws span a square, whose corners reach 1.41 * R. Round 43: on the creature trial's seed 7 a
+      // tethered wander ended 3.61 tiles from the point and the creature stayed there (sleep, play and
+      // poop are done in place), so "stayed near the tether point" failed. Free wandering is unchanged.
+      const od = Math.hypot(ox, oy);
+      if (tether && od > R) { ox *= R / od; oy *= R / od; }
+      const tx = Math.floor(cx + ox), ty = Math.floor(cy + oy);
       const g = paths.goalNear(f, tx + 0.5, ty + 0.5, 1.5);
       if (g >= 0) goal = g;
     }
@@ -375,7 +390,12 @@ export function create(game) {
   function complete(satisfies, effect) {
     emitAct();
     if (T.harm[act.key]) lastHarm[T.harm[act.key]] = time;
-    brain.completeAction(act.key, satisfies);
+    // An act of more than one stage (haul: pick up, carry, put in) is recorded at its first arrival
+    // (arrive()), but the player judges it when it finishes. Round 43: credit decays exp(-age /
+    // creditTau) from the recorded time, so a stroke at a delivery 8-9 s after the pickup moved
+    // haul:wood by about 0.01 instead of 0.1. Its credit time now moves to the completion. One-stage
+    // acts keep the time they were recorded at (the start of their pose).
+    brain.completeAction(act.key, satisfies, act.stage > 0 ? time : undefined);
     note(act.key, 'complete', effect);
     act = null;
     wait = T.decisionInterval;
@@ -412,8 +432,8 @@ export function create(game) {
         if (!o || !usableBuilding(o)) return abort('target-gone');
         {
           const before = o.hp;
-          const floor = o.type === 'temple' ? Math.min(o.hp, VILLAGE.templeMinHp) : 0;
-          o.hp = Math.max(floor, o.hp - T.smashDamage);
+          // A temple's hp setter (stoneHp in src/village/sim.js) floors this at VILLAGE.templeMinHp.
+          o.hp = Math.max(0, o.hp - T.smashDamage);
           return complete(undefined, { id: o.id, field: 'hp', before, after: o.hp });
         }
       case 'water':
@@ -525,6 +545,13 @@ export function create(game) {
   function onFeedback(kind, p) {
     if (!sync() || p?.creatureId !== entity.id) return;
     const r = brain.feedback(kind, typeof p.strength === 'number' ? p.strength : 1, time);
+    // A slap that leaves the act under way forbidden stops it: abort() sets down what it holds
+    // (letGo(true)), so a villager held in the eat or throw pose lives. Round 43: the brain only
+    // excludes forbidden keys when it next chooses, so a slapped eat or throw still killed its villager.
+    // This also stops an unrecorded act (still walking to its target) whose key the slap forbade
+    // through an earlier act of the same key: it would otherwise be done once more. The tether walk is
+    // the player's order, not a brain choice, and has no verb:target key.
+    if (kind === 'slap' && act && act.key !== 'tether' && brain.isForbidden(act.key)) abort('forbidden');
     poseOverride = { pose: kind === 'stroke' ? 'happy' : 'hurt', until: time + T.feedbackPose };
     feedbackShow = { kind, judged: r.judged, until: time + T.thoughtTime, result: r };
     writeThought();

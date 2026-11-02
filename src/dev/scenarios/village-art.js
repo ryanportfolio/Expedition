@@ -2,8 +2,9 @@
 // run for 90 sim seconds so villagers are mid-work, then a player house blueprint taken to the
 // `building` stage. Screenshots at zoom 1: player village, rival village, the construction site, and
 // the player village under the evil LUT. Asserts that every building, villager and item sprite in
-// view came from a registered painter (never the checker placeholder), and that the temple's
-// painted pedestals sit under the miracle orbs. Before the sim runs it checks the sprite contracts
+// view came from a registered painter (never the checker placeholder), that one miracle orb floats on
+// each of the player temple building's painted pedestals, and that each orb shows at least 90% of its
+// sprite pixels with the camera on the temple (screenshot temple-orbs). Before the sim runs it checks the sprite contracts
 // on the sprites themselves: building footprint widths and anchors per kind, owner and stage,
 // villager anchors on the feet for all 1120 combos, frames, jobs and owners all distinct, and
 // repaints identical to the registry's cached sprites.
@@ -151,22 +152,40 @@ export default async function villageArt(t, game) {
   const working = world.query({ kind: 'villager' }).filter((v) => v.pose === 'work' || v.pose === 'pray' || v.pose === 'carry');
   t.assert(working.length >= 3, `villagers mid-work after 90 s (${working.length} working, praying or carrying)`);
 
-  // Pedestals painted under the orbs (the miracles system spawns them round the player temple).
+  // Orbs on the pedestals the temple painter draws, and visible there. On this island the village
+  // can't build the player temple on world.sites.temple (the site is too steep) and puts it one tile
+  // west, so the check is against the temple *building*, never the site: an offset check against the
+  // site passed while the heal orb sat inside the temple and drew 0 of its pixels.
   const temple = world.query({ kind: 'building' }).find((b) => b.type === 'temple' && b.owner === 'player');
   const orbs = world.query({ kind: 'orb' });
   t.log('temple', { x: temple.x, y: temple.y, z: temple.z, site: world.sites.temple }, 'orbs', orbs.map((o) => [o.miracle, o.x, o.y, o.z]));
-  // The miracles system places orbs round the temple *site* tile; the painter draws pedestals at the
-  // same offsets round the temple *building's* center. Check the offsets match; report separately
-  // when the village had to move the temple off its site (then the two centers differ).
-  const ts = world.sites.temple;
-  if (orbs.length) {
-    const off = (o) => [o.x - (ts.x + 0.5), o.y - (ts.y + 0.5)];
-    const miss = orbs.filter((o) => !TEMPLE_PEDESTALS.some(([dx, dy]) => Math.hypot(off(o)[0] - dx, off(o)[1] - dy) < 0.05));
-    t.assert(miss.length === 0 && TEMPLE_PEDESTALS.length === orbs.length, `painted pedestal offsets match all ${orbs.length} orb offsets from the temple site`);
-    const shift = [temple.x - (ts.x + 0.5), temple.y - (ts.y + 0.5)];
-    if (Math.hypot(...shift) > 0.01)
-      t.log(`KNOWN ISSUE (outside this round): the village placed the player temple ${shift.join(', ')} tiles from world.sites.temple (site too steep), while src/miracles/orbs.js anchors orbs to the site, so orbs float ${shift.map((v) => -v).join(', ')} tiles from the painted pedestals on this map`);
-  } else t.log('no orbs present (miracles system idle); pedestal alignment not checked');
+  const off = (o) => [o.x - temple.x, o.y - temple.y];
+  const onPedestal = (o) => TEMPLE_PEDESTALS.findIndex(([dx, dy]) => Math.hypot(off(o)[0] - dx, off(o)[1] - dy) < 0.05);
+  const used = orbs.map(onPedestal);
+  t.assert(orbs.length === TEMPLE_PEDESTALS.length && used.every((i) => i >= 0) && new Set(used).size === orbs.length,
+    `one orb on each of the ${TEMPLE_PEDESTALS.length} painted temple pedestals (${orbs.map((o) => `${o.miracle} ${off(o).map((v) => +v.toFixed(2))}`).join('; ')})`);
+  // Visible: with the camera on the temple, take each orb's sprite away and count the pixels of its
+  // sprite box that change. A pixel the temple (or anything in front) covers doesn't change. The orb
+  // glows are left out while measuring: their additive core and glints can push a pixel to the same
+  // near-white with and without the sprite, which reads as hidden though nothing covers the orb.
+  focus(temple.x, temple.y);
+  const frame = () => Uint32Array.from(renderer.render().buf);
+  const glowItems = game.systems.miracles.orbs.glows, keptGlows = [...glowItems];
+  glowItems.clear();
+  for (const o of orbs) {
+    const spr = o.sprite, opaque = spr.data.reduce((n, v) => n + (v ? 1 : 0), 0);
+    const ctx = renderer.render(), with_ = Uint32Array.from(ctx.buf), { vx, vy } = ctx.toView(o.x, o.y, o.z);
+    o.sprite = null;
+    const without = frame();
+    o.sprite = spr;
+    let shown = 0;
+    for (let y = vy - spr.ay; y < vy - spr.ay + spr.h; y++)
+      for (let x = vx - spr.ax; x < vx - spr.ax + spr.w; x++)
+        if (x >= 0 && y >= 0 && x < display.w && y < display.h && with_[y * display.w + x] !== without[y * display.w + x]) shown++;
+    t.assert(shown >= 0.9 * opaque, `${o.miracle} orb visible beside the temple: ${shown} of its ${opaque} sprite pixels drawn (want 90%)`);
+  }
+  for (const [k, v] of keptGlows) glowItems.set(k, v);
+  await t.shot('temple-orbs');
 
   // Player village.
   focus(site.x + 0.5, site.y - 1.5);

@@ -4,14 +4,16 @@
 //
 // Two passes:
 //   (a) repo-wide, case-sensitive, whole words: every file under the repo root except node_modules,
-//       .tmp, .git and dist (at any depth; symlinked folders are not followed);
+//       .tmp, .git, dist, build and .playwright-mcp (at any depth) and .claude/worktrees (other
+//       sessions' worktrees when run from a main checkout); symlinked folders are not followed;
 //   (b) case-insensitive over game content only (src, scripts, docs, index.html, README.md, and any
 //       --extra path): every name except the four-letter one matches anywhere inside a word
-//       (plurals and compounds count), and the space on either side of "&" or "and" in the
-//       two-colour name is optional; the four-letter name matches only as a whole word, so
-//       ordinary words that contain it pass.
-// File paths are checked as well as file contents. Files containing a NUL byte are skipped as binary
-// and counted in the summary. `--extra <path>` (file or folder, repeatable) adds paths to both
+//       (plurals and compounds count); in the two-colour name the "&" or "and" is optional and any
+//       run of spaces, hyphens or slashes may sit on either side of it; the four-letter name
+//       matches only as a whole word, so ordinary words that contain it pass.
+// File paths are checked as well as file contents. A file that starts with a UTF-16 byte order mark
+// is decoded as UTF-16; any other file containing a NUL byte is skipped as binary and counted in the
+// summary. `--extra <path>` (file or folder, repeatable) adds paths to both
 // passes even inside an excluded folder; it exists to prove the gate fails on a planted file.
 // Prints each hit as path:line and exits 1 on any hit, 2 on a usage error, 0 when clean.
 //
@@ -21,7 +23,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SKIP_DIRS = new Set(['node_modules', '.tmp', '.git', 'dist']);
+const SKIP_DIRS = new Set(['node_modules', '.tmp', '.git', 'dist', 'build', '.playwright-mcp']);
+// Skipped only at this path from the repo root: other app sessions' worktrees in a main checkout.
+const SKIP_PATHS = new Set([path.join(ROOT, '.claude', 'worktrees')]);
 const CONTENT = ['src', 'scripts', 'docs', 'index.html', 'README.md'];
 
 const j = (...parts) => parts.join('');
@@ -32,7 +36,7 @@ const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const wordRe = (term, flags) => new RegExp(`(?<![A-Za-z0-9_])${escape(term)}(?![A-Za-z0-9_])`, flags);
 const STRICT_RE = STRICT.map((t) => ({ term: t, re: wordRe(t, '') }));
 const LOOSE_RE = [
-  { term: j('black', ' & / and ', 'white'), re: new RegExp(j('black', ' ?(&|and) ?', 'white'), 'i') },
+  { term: j('black', ' [&|and|-|/] ', 'white'), re: new RegExp(j('black', '[\\s\\-/]*(&|and)?[\\s\\-/]*', 'white'), 'i') },
   { term: j('lion', 'head'), re: new RegExp(j('lion', 'head'), 'i') },
   { term: j('kha', 'zar'), re: new RegExp(j('kha', 'zar'), 'i') },
   { term: j('ed', 'en'), re: wordRe(j('ed', 'en'), 'i') },
@@ -58,8 +62,9 @@ function* walk(p, skip = true) {
   if (st.isFile()) { yield p; return; }
   if (!st.isDirectory()) return;
   for (const d of fs.readdirSync(p, { withFileTypes: true })) {
-    if (skip && d.isDirectory() && SKIP_DIRS.has(d.name)) continue;
-    yield* walk(path.join(p, d.name), skip);
+    const child = path.join(p, d.name);
+    if (skip && d.isDirectory() && (SKIP_DIRS.has(d.name) || SKIP_PATHS.has(child))) continue;
+    yield* walk(child, skip);
   }
 }
 
@@ -72,9 +77,13 @@ function scan(file, rules) {
   for (const { term, re } of rules) if (re.test(name)) hits.set(`${name}:0:${term}`, `${term} (in the file path)`);
   let buf;
   try { buf = fs.readFileSync(file); } catch (err) { console.error(`check-ip: cannot read ${name}: ${err.message}`); process.exitCode = 2; return; }
-  if (buf.includes(0)) { binary++; return; }
+  let text;
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) text = buf.subarray(2).toString('utf16le');
+  else if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) text = Buffer.from(buf.subarray(2, buf.length - (buf.length % 2))).swap16().toString('utf16le');
+  else if (buf.includes(0)) { binary++; return; }
+  else text = buf.toString('utf8');
   scanned++;
-  const lines = buf.toString('utf8').split(/\r?\n/);
+  const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     for (const { term, re } of rules) {
       if (re.test(lines[i])) hits.set(`${name}:${i + 1}:${term}`, `${term}: ${lines[i].trim().slice(0, 160)}`);

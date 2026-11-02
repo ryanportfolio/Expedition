@@ -14,7 +14,13 @@ export const TUNING = {
      * side of the temple (top of the screen), fire and lightning on the near side. */
     pedestals: { rain: [0, -1.5], heal: [-1.5, 0], fire: [1.5, 0], lightning: [0, 1.5] },
     respawn: 4, // seconds before a taken orb is replaced on its pedestal
-    hover: 1.0, // height units above the ground
+    /** Height units from the stone's foot (the temple base) to the orb's bottom pixel. The painted
+     * stone (src/art/painters/buildings.js playerTemple) is 7 px tall and its top face reaches
+     * 0.14 tiles * 16 = 2.2 px higher at the back corner: 9.2 px, 1.16 units. The far orbs (rain,
+     * heal) sort behind the temple sprite, so any of their pixels below that line is painted over by
+     * the stone; at 1.0 the bob dipped them 2 to 4 rows into it. hover - bobAmp = 1.25 units (10 px)
+     * keeps every orb clear of its stone through the whole bob. */
+    hover: 1.5,
     bobAmp: 0.25, // height units
     bobPeriod: 2.4, // seconds per bob
     castSpeed: 2, // release speed (tiles/s) at or under which the orb counts as dropped and casts at once

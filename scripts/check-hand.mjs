@@ -1,6 +1,7 @@
 // Node check for the hand system (no browser). Builds createGame() without a canvas on the real
 // island, drives it only through input.synth, and checks grab / carry / release / flight / landing,
-// lethal and gentle villager landings, the sea, buildings, stroke reversal counting, slap, tether,
+// lethal and gentle villager landings, a cancelled press (blur) that drops instead of throwing, the sea, buildings, thrown pedestal orbs casting on their
+// landing point (and a landed entity already on its contact point), stroke reversal counting, slap, tether,
 // the flight math against the closed form, the lethal threshold edge, that update() and the input
 // handlers never touch the DOM or call Math.random, that every emitted event carries its spec
 // fields, and that a painter registered before the hand loads keeps its sprite. Exits 1 and prints
@@ -248,6 +249,30 @@ section('villagers: hard throw kills, gentle drop does not', () => {
   ok(onTerrain(world, v2) && !v2.airborne, 'dropped villager stands on the terrain');
 });
 
+// Round 46: a window blur, a lost capture or a cancelled pointer ends the press through
+// input.cancel() (scripts/check-engine.mjs checks the DOM side). Before, it was an ordinary release
+// with the speed of the last moves, so alt-tabbing out mid-throw threw the villager to its death.
+section('a cancelled press mid-throw drops the villager, never throws it', () => {
+  const f = setup();
+  const { step, sp, grab, s, game } = f;
+  const v = sp('villager', 20.5, 39.5, { hp: 1, sprite: getSprite('test-figure') });
+  const n = f.log.length;
+  grab(v);
+  // the moves of the hard throw above (flick(1, 0.2, 14)), ended by a cancel instead of a release
+  const k = 14 / HAND.throwGain / Math.hypot(1, 0.2), sv = groundToScreenVelocity(k, 0.2 * k), p = game.input.pointer;
+  for (let i = 0; i < 4; i++) { s.move(p.sx + sv.vsx / 30, p.sy + sv.vsy / 30); step(1 / 30); }
+  const would = releaseVelocity(p.vsx, p.vsy);
+  s.cancel();
+  step(2);
+  const rel = f.since(n).find((e) => e.type === 'release' && e.entityId === v.id);
+  const landed = f.since(n).find((e) => e.type === 'landed' && e.entityId === v.id);
+  const act = f.since(n).find((e) => e.type === 'act' && e.target === 'villager');
+  ok(would.thrown && rel && rel.vx === 0 && rel.vy === 0 && rel.vz === 0,
+    `the cancel releases with no speed (a release here would throw at ${would.speed.toFixed(1)} tiles/s; released at ${rel ? Math.hypot(rel.vx, rel.vy).toFixed(1) : '-'})`);
+  ok(landed && landed.speed < HAND.lethalSpeed && v.hp === 1 && act?.verb === 'drop',
+    `the villager is dropped and lives (landed at ${landed?.speed.toFixed(2)}, hp ${v.hp}, act ${act?.verb})`);
+});
+
 section('lethal threshold edge', () => {
   const f = setup();
   const { world, game } = f;
@@ -353,6 +378,56 @@ section('trees uproot, orbs carry their miracle', () => {
   step(1);
   ok(f.since(n).some((e) => e.type === 'landed' && e.entityId === orb.id), 'orb lands');
   ok(game.systems.hand.state.flights.size === 0, 'no flights left');
+});
+
+// The miracles testbed flies its orbs with a stand-in that moves the orb exactly onto the landing
+// point, so it can't see where the real hand leaves the entity when `landed` fires. Here the real
+// hand throws the real pedestal orbs (village set up, temple and orbs where the game puts them) and
+// the cast must land on the reported landing point. Before round 44 the hand emitted `landed` with
+// the entity still at its last tick position, up to 0.4 tiles short.
+section('thrown pedestal orbs cast where they land', () => {
+  const f = setup();
+  const { game, world, camera, s, step, middle, moveTo, flick, since } = f;
+  game.systems.village.setup();
+  game.state.power = 1000;
+  step(0.2);
+  const ts = world.sites.temple;
+  camera.centerOn(ts.x, ts.y, world.heightAt(ts.x, ts.y));
+  step(1 / 30);
+  const casts = [];
+  game.events.on('miracle-cast', (e) => casts.push(e));
+  // landed listeners read the entity (the orbs cast where the orb is; the village reads the landed
+  // villager): it must already sit on the reported contact point. The orbs' own listener removes the
+  // orb before a listener added here runs, so a thrown rock checks this.
+  const seen = [];
+  game.events.on('landed', (e) => { const o = world.get(e.entityId); if (o) seen.push({ ...e, ex: o.x, ey: o.y, ez: o.z }); });
+  const rock = world.spawn('rock', { x: 20.5, y: 40.5 });
+  world.move(rock, rock.x, rock.y, world.heightAt(rock.x, rock.y) + 1.5);
+  game.systems.hand.launch(rock, 14, 0, 14);
+  step(2);
+  const at = seen.find((e) => e.entityId === rock.id);
+  ok(at && at.ex === at.x && at.ey === at.y && at.ez === at.z,
+    `a thrown rock sits on the landing point when landed fires (entity ${at && [at.ex.toFixed(3), at.ey.toFixed(3), at.ez.toFixed(3)]}, landed ${at && [at.x.toFixed(3), at.y.toFixed(3), at.z.toFixed(3)]})`);
+  const dirs = { rain: [1, 0.3], heal: [0.3, 1], fire: [1, 1], lightning: [0.6, 1] };
+  for (const [miracle, [dx, dy]] of Object.entries(dirs)) {
+    const id = game.systems.miracles.orbs.orbOn(miracle);
+    const orb = id !== null && world.get(id);
+    if (!ok(orb, `${miracle}: a pedestal orb is waiting`)) continue;
+    moveTo(middle(orb));
+    s.down(0);
+    step(0.3);
+    if (!ok(game.systems.hand.state.heldId === id, `${miracle}: the hand grabs the pedestal orb`)) { s.up(0); step(1); continue; }
+    const n = f.log.length, c0 = casts.length;
+    flick(dx, dy, 12);
+    const rel = since(n).find((e) => e.type === 'release' && e.entityId === id);
+    ok(rel && Math.hypot(rel.vx, rel.vy) > 6, `${miracle}: thrown, not dropped (${rel && Math.hypot(rel.vx, rel.vy).toFixed(2)} tiles/s)`);
+    step(2);
+    const land = since(n).find((e) => e.type === 'landed' && e.entityId === id), cast = casts.slice(c0).find((e) => e.miracle === miracle);
+    ok(land && cast && near(cast.x, land.x, 1e-9) && near(cast.y, land.y, 1e-9),
+      `${miracle}: cast point equals the landing point (landed ${land && [land.x.toFixed(3), land.y.toFixed(3)]}, cast ${cast && [cast.x.toFixed(3), cast.y.toFixed(3)]})`);
+    ok(!world.get(id), `${miracle}: the orb is gone after its cast`);
+    step(5); // pedestal respawn
+  }
 });
 
 section('catch a flying rock', () => {
@@ -550,7 +625,8 @@ section('every emitted event carries its spec fields', () => {
     stroke: (e) => id(e.creatureId) && num(e.strength) && e.strength >= 0.2 && e.strength <= 1,
     slap: (e) => id(e.creatureId) && e.strength === 1,
     tether: (e) => id(e.creatureId) && num(e.x) && num(e.y),
-    act: (e) => e.actor === 'player' && ['throw', 'drop', 'uproot'].includes(e.verb) && typeof e.target === 'string'
+    // 'cast' acts come from the miracles system (the pedestal orb throws above), the rest from the hand
+    act: (e) => e.actor === 'player' && (['throw', 'drop', 'uproot'].includes(e.verb) || (e.verb === 'cast' && ['rain', 'heal', 'fire', 'lightning'].includes(e.target))) && typeof e.target === 'string'
       && num(e.weight) && e.weight >= -1 && e.weight <= 1 && num(e.x) && num(e.y),
   };
   for (const [type, valid] of Object.entries(SPEC)) {

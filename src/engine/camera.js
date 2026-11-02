@@ -9,9 +9,22 @@ const KEY_SPEED = 240; // world px / s
 const EDGE = 2; // view px band that triggers edge pan
 const MARGIN = 32; // world px of sea allowed past the map edge
 const MAX_Z = 16;
+// Wheel delta per zoom step. A mouse notch is 100 (Chrome, deltaMode pixels); a touchpad sends many
+// small deltas (a few px each). Stepping on any delta made one touchpad flick jump 3 -> 4 -> 6.
+const WHEEL_STEP = 100;
 
-export function createCamera({ display, input, world }) {
+export function createCamera({ display, input, world, events = null }) {
   let dragLast = null;
+  // Middle drag: anchor at the press, not at the first tick after it, so movement between the press
+  // and that tick still pans (round 42: a quick drag lost its start). The release applies the
+  // movement since the last tick the same way.
+  events?.on('pointer-down', (e) => { if (e.button === 1) dragLast = { sx: e.sx, sy: e.sy }; });
+  events?.on('pointer-up', (e) => {
+    if (e.button !== 1 || !dragLast) return;
+    camera.x -= e.sx - dragLast.sx; camera.y -= e.sy - dragLast.sy;
+    dragLast = null;
+    camera.clamp();
+  });
   const camera = {
     x: 0, y: 0,
     edgePan: true,
@@ -77,10 +90,13 @@ export function createCamera({ display, input, world }) {
         if (dragLast) { camera.x -= p.sx - dragLast.sx; camera.y -= p.sy - dragLast.sy; }
         dragLast = { sx: p.sx, sy: p.sy };
       } else dragLast = null;
-      if (input.wheel) {
-        camera.zoomStep(input.wheel < 0 ? 1 : -1, p.sx, p.sy);
-        input.wheel = 0;
-        if (dragLast) dragLast = null;
+      // Wheel: one zoom step per WHEEL_STEP of accumulated delta; the remainder waits for more. At
+      // the last scale the delta is dropped, so a later turn the other way acts at once.
+      while (Math.abs(input.wheel) >= WHEEL_STEP) {
+        const dir = input.wheel < 0 ? 1 : -1;
+        if (!camera.zoomStep(dir, p.sx, p.sy)) { input.wheel = 0; break; }
+        input.wheel += dir * WHEEL_STEP;
+        if (dragLast) dragLast = null; // the pointer now sits on another view pixel
       }
       camera.clamp();
     },

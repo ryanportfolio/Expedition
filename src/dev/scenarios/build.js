@@ -9,6 +9,8 @@
 //   placed   a click plans the blueprint (a new player house site in the world and in stats())
 // then Esc puts the plan away. The hand must not grab anything during the flow.
 // Works at any window size.
+import { buildTerrainCache, surfaceHeights, PART } from '../../terrain/cache.js';
+
 export default async function build(t, game) {
   const { world, camera, events, systems } = game;
   const st = game.state;
@@ -35,15 +37,48 @@ export default async function build(t, game) {
   t.assert(U.last.build.slots.every((x) => x.cost > 0) && !U.last.ghost, 'the bar shows a wood cost for every kind; no ghost while the pointer is on the bar');
   await t.shot('bar');
 
-  // aim at the centre of tile (tx, ty) with the camera on (cx, cy); returns the tile under the pointer
+  // What the terrain draws: the cache's pixel owner map (src/terrain/cache.js) names the tile and face
+  // that drew each world pixel, and surfaceHeights the height each tile top is drawn at (water flat at
+  // sea level). Before round 42 aim() projected tile centres with world.heightAt, the smooth surface
+  // the pick also used, so the scenario passed while 5.5% of the land top pixels within 8 tiles of
+  // the village (2,879 of 52,480) picked another tile than the one drawn there, and the ghost snapped to it.
+  const own = buildTerrainCache(world, { owner: true }), surf = surfaceHeights(world);
+  const drawnAt = (vx, vy) => {
+    const wx = vx + Math.round(camera.x) - own.ox, wy = vy + Math.round(camera.y) - own.oy;
+    const o = wx >= 0 && wy >= 0 && wx < own.w && wy < own.h ? own.owner[wy * own.w + wx] : 0;
+    if (!o) return null;
+    const i = (o >> 2) - 1;
+    return { tx: i % world.w, ty: (i - (i % world.w)) / world.w, top: (o & 3) === PART.TOP };
+  };
+
+  // every land top pixel within 8 tiles of the village centre picks the tile drawn there, through the
+  // pointer's own pick (input.toWorld)
+  {
+    camera.centerOn(site.x, site.y, world.heightAt(site.x, site.y));
+    t.step(1 / 30);
+    let n = 0, bad = 0;
+    const firstBad = [];
+    for (let vy = 0; vy < game.display.h; vy++) for (let vx = 0; vx < game.display.w; vx++) {
+      const d = drawnAt(vx, vy);
+      if (!d || !d.top || world.tile(d.tx, d.ty).ground <= 1 || Math.hypot(d.tx + 0.5 - site.x, d.ty + 0.5 - site.y) > 8) continue;
+      n++;
+      const p = game.input.toWorld(vx, vy);
+      if (!p || Math.floor(p.x) !== d.tx || Math.floor(p.y) !== d.ty) { bad++; if (firstBad.length < 3) firstBad.push(`view (${vx}, ${vy}) drawn ${d.tx},${d.ty} picked ${p ? `${Math.floor(p.x)},${Math.floor(p.y)}` : 'nothing'}`); }
+    }
+    t.assert(n > 5000 && bad === 0, `land tops near the village: ${bad} of ${n} pixels pick another tile than the one drawn ${firstBad.join('; ')}`);
+  }
+
+  // aim at the centre of tile (tx, ty)'s drawn top with the camera on (cx, cy); returns the tile under
+  // the pointer and the tile drawn at the pointer's pixel
   const aim = (tx, ty, cx = tx + 0.5, cy = ty + 0.5) => {
     camera.centerOn(cx, cy, world.heightAt(cx, cy));
     t.step(1 / 30);
-    const p = t.input.move(tx + 0.5, ty + 0.5, { world: true });
+    const p = t.input.move(tx + 0.5, ty + 0.5, { world: true, z: surf[ty * world.w + tx] });
     t.step(1 / 30);
     const q = game.input.pointer;
-    return q.hit ? { tx: Math.floor(q.x), ty: Math.floor(q.y), at: p } : null;
+    return q.hit ? { tx: Math.floor(q.x), ty: Math.floor(q.y), drawn: drawnAt(p.sx, p.sy), at: p } : null;
   };
+  const onDrawn = (got) => got && got.drawn && got.drawn.tx === got.tx && got.drawn.ty === got.ty;
 
   // invalid: the water tile nearest the village, the camera between the two
   const waters = [];
@@ -58,6 +93,7 @@ export default async function build(t, game) {
     if (got && world.tile(got.tx, got.ty).ground <= 1) { water = got; break; }
   }
   t.assert(!!water, `the pointer is over water near the village (${JSON.stringify(water)})`);
+  t.assert(onDrawn(water), `over water the pointer names the tile drawn under it (${JSON.stringify(water)})`);
   t.step(1 / 30);
   const bad = U.build.hover, gBad = U.last.ghost;
   t.assert(bad && !bad.ok && bad.reason === 'water', `over water the house is refused: ${bad?.reason}`);
@@ -79,6 +115,7 @@ export default async function build(t, game) {
     if (got && vs.validate('house', got.tx, got.ty, 'player').ok) good = got;
   }
   t.assert(!!good, `open ground for a house near the village centre (${JSON.stringify(good)})`);
+  t.assert(onDrawn(good), `over open ground the pointer names the tile drawn under it (${JSON.stringify(good)})`);
   t.step(1 / 30);
   const ok = U.build.hover, gOk = U.last.ghost;
   t.assert(ok && ok.ok && gOk && gOk.ramp === 'heal' && gOk.drawn > 50 && !gOk.label, `green ghost at ${ok?.tx},${ok?.ty} (${gOk?.drawn} px)`);

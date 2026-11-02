@@ -144,8 +144,13 @@ function renderCheck(view, st) {
   const cBody = lut[idx(...FILL.power.slice(0, 2))], cLit = lut[idx(FILL.power[0], FILL.power[2])];
   ok(count(buf, W, H, body, cBody) === wantP * (P.rect.h - 1) && count(buf, W, H, top, cLit) === wantP, `${tag}: power bar pixels in the frame = ${wantP} columns`);
   const A = hud.align, wantA = signedFill(st.alignment, ALIGN.scale.w).fill;
-  const goodBody = lut[idx(FILL.good[0], FILL.good[1])];
-  ok(A.fill === wantA && count(buf, W, H, { ...A.rect, y: A.rect.y + 1, h: A.rect.h - 1 }, goodBody) === Math.max(0, wantA) * (A.rect.h - 1), `${tag}: alignment ${st.alignment} -> ${A.fill} px good fill in the frame (want ${wantA})`);
+  // Both fills are counted on every frame: a negative alignment draws only the evil fill, so a check
+  // of the good fill alone (0 px wanted) would pass a frame with no fill at all.
+  const goodBody = lut[idx(FILL.good[0], FILL.good[1])], evilBody = lut[idx(FILL.evil[0], FILL.evil[1])];
+  const aBody = { ...A.rect, y: A.rect.y + 1, h: A.rect.h - 1 };
+  const goodPx = count(buf, W, H, aBody, goodBody), evilPx = count(buf, W, H, aBody, evilBody);
+  ok(A.fill === wantA && goodPx === Math.max(0, wantA) * aBody.h && evilPx === Math.max(0, -wantA) * aBody.h,
+    `${tag}: alignment ${st.alignment} -> ${A.fill} px fill in the frame (want ${wantA}; good ${goodPx} px, evil ${evilPx} px)`);
   const R = hud.rival, wantR = beliefFill(st.belief, st.beliefMix, RIVAL.bar.w);
   const rb = { ...R.rect, y: R.rect.y + 1, h: R.rect.h - 1 };
   ok(R.fill === wantR.fill && count(buf, W, H, rb, R.impressColor) === wantR.impress * rb.h && count(buf, W, H, rb, R.scareColor) === wantR.scare * rb.h,

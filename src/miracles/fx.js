@@ -20,6 +20,7 @@ import * as healAoe from 'pixelfx/fx/holy/heal-aoe';
 import * as lightningStrike from 'pixelfx/fx/lightning/lightning-strike';
 import * as poof from 'pixelfx/fx/spawn/poof';
 import { fit, sparkle } from 'pixelfx';
+import { TUNING } from './tuning.js';
 
 // ---- rain cloud without its bolt
 const SKIP_FROM = 51, SKIP = 21, FPS = 30;
@@ -32,6 +33,7 @@ export const rainCloud = {
 
 // ---- small orb glow (pixelfx effect module contract: meta + draw/drawBack(p, t, o))
 const GLOW_D = 2.4;
+const GROUND_LIGHT_Y = Math.round(TUNING.orbs.hover * 8);
 const orbit = (t, i) => {
   const a = (t / GLOW_D) * Math.PI * 2 * (i % 2 ? -1 : 1) + (i * Math.PI * 2) / 3;
   return { x: Math.cos(a) * 8, y: Math.sin(a) * 2.5 - 3, front: Math.sin(a) > 0 };
@@ -57,8 +59,9 @@ export const orbGlow = {
     p.circle(0, -3, 3.5, C[3], 0.7);
     p.glow(0, -3, 14 + 3 * pulse, C[2], 0.32 + 0.12 * pulse);
     p.glow(0, -3, 5, C[4], 0.25 + 0.1 * pulse);
-    // the light it throws on the ground under it (one height unit = 8 px below the orb's anchor)
-    p.glow(0, 8, 12, C[2], 0.22 + 0.08 * pulse);
+    // the light it throws on the stone or ground under it, a pedestal orb's hover below its anchor
+    // (8 px per height unit)
+    p.glow(0, GROUND_LIGHT_Y, 12, C[2], 0.22 + 0.08 * pulse);
     motes(p, t, o, false);
   },
   draw(p, t, o) {

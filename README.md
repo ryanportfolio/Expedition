@@ -45,7 +45,7 @@ Runs every scenario in `src/dev/scenarios/` in a real Chrome window, one at a ti
 npm run check:ip
 ```
 
-Fails if a name from another company's game appears anywhere in the repository. The banned names are listed in `scripts/check-ip.mjs`.
+Fails if a name from another company's game appears in the name or text of a file in the repository. It scans every text file, including UTF-16 files with a byte order mark, and skips binary files, symlinks, and the `.git`, `.tmp`, `dist`, `build`, `node_modules`, `.playwright-mcp` and `.claude/worktrees` folders. Game content (`src`, `scripts`, `docs`, `index.html`, this README) is also checked without regard to case. The banned names are listed in `scripts/check-ip.mjs`.
 
 ## Credits
 
