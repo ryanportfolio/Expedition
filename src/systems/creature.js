@@ -28,6 +28,8 @@
 import { createBrain } from '../creature/brain.js';
 import { createCreaturePaths } from '../creature/path.js';
 import { CREATURE as T } from '../creature/tunables.js';
+import { woodIn } from '../village/config.js';
+import { removeTree } from '../village/sim.js';
 import { stepBody } from '../hand/flight.js';
 import { HAND } from '../hand/tunables.js';
 import { VILLAGE } from '../village/config.js';
@@ -366,16 +368,16 @@ export function create(game) {
     }
     if (verb === 'haul' && act.stage === 0) {
       if (o.kind === 'building') {
-        o.wood -= 1;
+        const n = Math.min(o.wood, T.pileHaul);
+        o.wood -= n;
         const vill = game.systems.village?.sim?.village?.(o.owner);
-        if (vill) vill.woodSpent += 1;
-        o = world.spawn('wood', { x: entity.x, y: entity.y, z: entity.z + T.carryZ, vx: 0, vy: 0, vz: 0, amount: 1, grabbable: true, sprite: getSprite('wood') });
+        if (vill) vill.woodSpent += n;
+        o = world.spawn('wood', { x: entity.x, y: entity.y, z: entity.z + T.carryZ, vx: 0, vy: 0, vz: 0, amount: n, grabbable: true, sprite: getSprite('wood') });
       } else if (o.kind === 'tree') {
         // fell it: the tree becomes a load of wood, removed the way the village's woodcutters do
-        world.remove(o.id);
-        const i = o.src ? world.trees.indexOf(o.src) : -1;
-        if (i >= 0) world.trees.splice(i, 1);
-        o = world.spawn('wood', { x: entity.x, y: entity.y, z: entity.z + T.carryZ, vx: 0, vy: 0, vz: 0, amount: T.fellWood, grabbable: true, madeBy: 'creature', sprite: getSprite('wood') });
+        const n = woodIn(o);
+        removeTree(world, o);
+        o = world.spawn('wood', { x: entity.x, y: entity.y, z: entity.z + T.carryZ, vx: 0, vy: 0, vz: 0, amount: n, grabbable: true, madeBy: 'creature', sprite: getSprite('wood') });
       }
       hold(o);
     }

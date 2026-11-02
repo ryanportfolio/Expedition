@@ -204,15 +204,15 @@ export async function creatureTrial(game, h) {
           for (let dx = -r; dx <= r && id === null; dx++)
             if (Math.max(Math.abs(dx), Math.abs(dy)) === r && vs.validate('house', vc.x + dx, vc.y + dy).ok) id = vs.placeBlueprint('house', vc.x + dx, vc.y + dy);
       const wp = world.query({ kind: 'building' }).find((b) => b.type === 'woodpile' && b.owner === 'player');
-      if (wp) wp.wood = Math.max(wp.wood, 5);
+      if (wp) wp.wood = Math.max(wp.wood, 250);
       // The village's builders haul to the same blueprint; a well-stocked village can fill it before
       // the creature arrives, so its cost is held out of reach for this case and put back after.
       const bp = id !== null ? world.get(id) : null;
       const cost = bp?.woodCost;
-      if (bp) bp.woodCost = 1000;
+      if (bp) bp.woodCost = 1e6;
       const { effect: x } = force('haul:wood', 90);
       if (bp) bp.woodCost = cost;
-      h.assert(id !== null && x && x.id === id && x.field === 'woodHave' && x.after === x.before + 1, `haul:wood carries wood to the blueprint (${JSON.stringify(x)}, blueprint ${id})`);
+      h.assert(id !== null && x && x.id === id && x.field === 'woodHave' && x.after > x.before, `haul:wood carries wood to the blueprint (${JSON.stringify(x)}, blueprint ${id})`);
     }
     {
       let landed = 0;
@@ -275,7 +275,7 @@ export async function creatureTrial(game, h) {
       h.log('weak state', JSON.stringify({ pose: st.pose, action: st.action, weak: st.weak }));
       cs.debug.holdHunger = null;
       cs.debug.candidateFilter = null;
-      for (const b of world.query({ kind: 'building' })) if (b.type === 'storehouse' && b.owner === 'player' && b.hp > 0) b.grain = Math.max(b.grain, 12);
+      for (const b of world.query({ kind: 'building' })) if (b.type === 'storehouse' && b.owner === 'player' && b.hp > 0) b.grain = Math.max(b.grain, 240);
       const grainBefore = actsOf('eat:grain');
       const waited = waitFor(() => !brain.weak, 120);
       h.assert(waited < Infinity && actsOf('eat:grain') > grainBefore && brain.canThrow, `recovered after eating grain in ${waited.toFixed(1)} s (weak ${brain.weak}, hunger ${brain.needs.hunger.toFixed(2)})`);

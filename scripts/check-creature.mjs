@@ -308,7 +308,7 @@ for (const seed of [1, 2, 3]) {
     for (let dy = -r; dy <= r && id === null; dy++)
       for (let dx = -r; dx <= r && id === null; dx++)
         if (Math.max(Math.abs(dx), Math.abs(dy)) === r && vs.validate('house', vc.x + dx, vc.y + dy).ok) id = vs.placeBlueprint('house', vc.x + dx, vc.y + dy);
-  world.get(id).woodCost = 1000; // keeps needing wood, so every haul goes to it
+  world.get(id).woodCost = 1e6; // keeps needing wood, so every haul goes to it
   cs.debug.candidateFilter = (c) => c.key === 'haul:wood';
   const agg = () => cs.brain.table().aggregates.find((x) => x.key === 'haul:wood')?.score ?? 0;
   let delivered = null;

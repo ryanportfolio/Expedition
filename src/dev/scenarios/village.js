@@ -69,7 +69,7 @@ export default async function village(t, game) {
   while (house.stage !== 'done' && waited < 240) {
     run(1);
     waited++;
-    if (!shotMid && (house.stage === 'building' || house.woodHave >= 2)) {
+    if (!shotMid && (house.stage === 'building' || house.woodHave > 0)) {
       shotMid = true;
       t.log('mid-construction', { stage: house.stage, woodHave: house.woodHave, progress: house.progress });
       await t.shot('mid-construction');
