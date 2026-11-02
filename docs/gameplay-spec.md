@@ -1,6 +1,6 @@
 # Gameplay specification
 
-Expedition follows the mechanics of one earlier god game, called "the reference game" in this repository, and of its expansion. This document says how that game plays, system by system, with the numbers the sources give, so that build sessions add features to one shared spec instead of guessing. It then compares Expedition as it stands on `main` (commit `c8882b0`) with the reference, lists the gaps, and proposes an order to close them.
+Expedition follows the mechanics of one earlier god game, called "the reference game" in this repository, and of its expansion. This document says how that game plays, system by system, with the numbers the sources give, so that build sessions add features to one shared spec instead of guessing. It then compares Expedition as it stands on `main` (commit `c8882b0`) with the reference, lists the gaps, records the user's design decisions, and proposes an order to close the gaps.
 
 It describes mechanics only. Expedition keeps its own names, art, interface layout and text, and its own art direction (grounded, muted, weathered). Nothing here is copied from a manual, wiki or guide; every line is a summary in our words.
 
@@ -24,7 +24,7 @@ Sources are cited in square brackets with these keys:
 | VID | 14 gameplay videos with captions: a silent tutorial run, a 21-part good-path series, land-by-land runs, an evil-leaning series. Timestamps are kept in the research notes. | First-hand, play as observed |
 | REV | Reviews (about 10 outlets) and the encyclopedia entries for the game and expansion. Several review pages were blocked and are known only from search summaries. | Secondary |
 
-The research notes, the full URL list (about 150 pages and 14 videos) and the video transcripts live outside the repository, because nearly every URL contains the reference game's name and `npm run check:ip` bans it from committed files. The "Sources" section of the pull request that added this file says where they are.
+The research notes, the full URL list (about 150 pages and 14 videos) and the video transcripts live outside the repository, because nearly every URL contains the reference game's name and `npm run check:ip` bans it from committed files. [Decision 6](#decisions) says where they are kept.
 
 "Unknown" means no readable source gives it; nothing here fills such a gap with a guess. Where sources disagree, the text says so, and the [disagreements](#where-sources-disagree) section collects them.
 
@@ -373,7 +373,7 @@ Costs are tribute / wood / ore where known. "Free" means no tribute.
 - **Important.** Rival tempo: the first land's rogue platoons move about 5 to 6 minutes in; expansion assaults about 10 minutes in; one expansion land casts a whirlwind at the player within minutes. [WIKI, FAN]
 - **Important.** Tribute: tutorials 1,000 to 5,000; challenges 5,000 to 50,000; land wins 100,000 to 120,000; wonders 400,000 to 1,000,000. [WIKI, GUIDE]
 
-A browser version on a 64 x 64 tile island cannot hold 300-person towns. The ratios matter more than the totals: homes of about 7 to 10, a field per several farmers, wood in the hundreds per building and thousands per grand building, tribute costs where the cheapest useful unlock takes one or two objectives and a wonder takes most of a land.
+Expedition aims at this scale ([decision 4](#decisions)): towns of hundreds of villagers with no fixed cap, homes of about 7 to 10, a field per several farmers, wood in the hundreds per building and thousands per grand building, tribute costs where the cheapest useful unlock takes one or two objectives and a wonder takes most of a land. The current 64 x 64 island cannot hold that, so the build order enlarges the world early (step 2).
 
 ---
 
@@ -423,7 +423,7 @@ Read from `main` at `c8882b0`: `src/systems/`, `src/village/`, `src/creature/`, 
 | Reference | Expedition today | Gap |
 |---|---|---|
 | Grab the land with the move button and drag | Middle-drag pans; right button is used for slap and tether | Medium (button map) |
-| Rotate and pitch | Fixed isometric view, no rotation | Large; a pixel version could offer four 90-degree turns, which needs every sprite drawn from four sides, or skip it |
+| Rotate and pitch | Fixed isometric view, no rotation | Large; planned near the end (decision 2, step 16): four 90-degree turns, every sprite drawn from four sides |
 | Wheel zoom from close-up to whole island | Four zoom steps (2, 3, 4, 6 device px per game px) | Small |
 | Double-click travel | Absent | Small |
 | Keys to town centre and creature, bookmarks, click a flag to fly to a platoon | Absent | Small |
@@ -433,7 +433,7 @@ Read from `main` at `c8882b0`: `src/systems/`, `src/village/`, `src/creature/`, 
 | Reference | Expedition today | Gap |
 |---|---|---|
 | Seven disciple jobs plus soldiers | Four jobs (farmer, woodcutter, builder, worshipper) plus idle, dealt out automatically by shares | Medium |
-| Jobs mostly by hand; unassigned villagers work slowly | Jobs mostly automatic; the hand only overrides for 90 s | Medium (design choice; see open questions) |
+| Jobs mostly by hand; unassigned villagers work slowly | Jobs mostly automatic; the hand only overrides for 90 s | Small (decision 1 keeps automatic; a hand-set job must stay) |
 | Food need, slowdown and unhappiness, never death by hunger | Hunger rises over 120 s; a hungry villager eats 1 grain or walks at 60% speed | Small |
 | Housing need, homelessness | Houses only cap births (3 per house); no homes, no homelessness | Medium |
 | Age, children, old age, mourning | Absent | Medium |
@@ -444,7 +444,7 @@ Read from `main` at `c8882b0`: `src/systems/`, `src/village/`, `src/creature/`, 
 | Impressiveness number with modifiers | Absent | Large |
 | Migration of rival villagers to the more impressive town, with a flag to accept or refuse | Absent; the rival converts all at once when a belief meter fills | Large |
 | Influence area growing with population and buildings, shown as a border | Fixed placement radius: 10 tiles from the temple or 5 from a finished building; not drawn | Medium |
-| Villages start at 34 to 50 people | 9 player and 8 rival villagers; a full village in the perf scene holds 12 | Tuning |
+| Villages start at 34 to 50 people and grow to hundreds | 9 player and 8 rival villagers on a 64 x 64 island; a full village in the perf scene holds 12 | Large (decision 4: reference scale needs a bigger map and crowd performance) |
 
 ### Economy
 
@@ -537,41 +537,42 @@ Read from `main` at `c8882b0`: `src/systems/`, `src/village/`, `src/creature/`, 
 
 | Reference | Expedition today | Gap |
 |---|---|---|
-| Several lands, each a fresh island with its own rivals, carrying tribute and the creature | One island, one rival village | Large |
+| Several lands, each a fresh island with its own rivals, carrying tribute and the creature | One island, one rival village | Medium (decision 5: one larger island with several rival towns; a chain is optional) |
 | Rival towns of 8 to 470 people, several per land | One rival village of 8 that grows by one blueprint every 2 minutes | Large |
+
+---
+
+## Decisions
+
+The user settled these on 2026-11-02. Later steps follow them.
+
+1. **Jobs.** Villagers keep Expedition's automatic job assignment by default. The player can also assign a job by hand by dropping a villager on its place, and a job set by hand stays until the player clears it; automatic assignment never moves that villager.
+2. **Camera rotation.** Planned, built near the end (step 16). Until then the view stays fixed, and new sprites need not be drawn from four sides yet.
+3. **The belief meter.** Replaced by migration (step 9). Impressing a rival town pulls its villagers over; the force route takes its town centre; the conversion epic takes what neither can. Expedition's fear side of the meter has no counterpart in the reference and goes with it.
+4. **Scale.** Close to the reference with no fixed cap: towns of hundreds of villagers, up to the 800 to 1,200 the largest reference towns reached, and costs and tribute in the reference's ranges. This needs a much larger map than 64 x 64 and a sim and renderer that hold hundreds of villagers inside the frame budget (step 2).
+5. **Lands.** One larger island for now. The reference itself is a chain of nine separate islands (see 1), so a chain stays possible later (step 17); for now one island carries several rival towns.
+6. **Source list.** The URL list and research notes stay out of the repository, so `check:ip` keeps its rule with no exception. A copy is kept on the author's machine at `D:\CoreWise\_artifacts\Expedition\gameplay-research\` (`sources-index.md` maps the keys above to URLs; `research-*.md` holds the per-claim notes; `transcripts\` the 14 video transcripts).
 
 ---
 
 ## Proposed build order
 
-Each step leaves a game that plays better than before and gives the next step something to stand on. The order follows the core items above and the user's first complaint.
+Each step leaves a game that plays better than before and gives the next step something to stand on. The order follows the core items above, the user's first complaint and the decisions above.
 
-1. **The hand in bulk.** Hold to suck up grain from fields and the store and wood from trees, in amounts that grow while the button is held; drop on the store to deposit and on a blueprint to pay into it; pour onto a blueprint to god-build at extra cost; shake to empty. Multi pick-up for villagers and trees (sweep while holding). This is the complaint the user raised first, and every later system leans on it. Scale building costs up to match bulk amounts. *Size: large.*
-2. **One store, ore, regrowing forests.** Merge the storehouse and woodpile into one store for food, wood and ore; add ore rocks and a mine; foresters who replant; seedlings and rain that grow trees. *Medium.*
-3. **Jobs by hand.** Make dropped jobs permanent with a job colour, add breeder and forester, add clearing a job, and let unassigned villagers do slow, unprompted work. Keep a light automatic assignment until the user decides (see open questions). *Medium.*
-4. **Influence area.** A border round the town that grows with buildings and people; the hand works only inside it; throws can leave it. *Medium.*
-5. **Camera.** Move the camera to the right button (grab the land), double-click travel, keys to the town centre and creature. Slap moves to a fast side-to-side stroke over the creature, as the reference does it. Decide on rotation (see open questions). *Medium.*
-6. **Town centre and wants.** A prebuilt town centre whose statues show the most urgent want and its urgency, a draggable wanted-building blueprint, an information scroll on hover; hover tooltips for buildings and villagers. *Large.*
-7. **Homes, happiness, impressiveness.** Homes with capacity and homelessness; happiness; the impressiveness number with its modifiers (placement, alignment, housing, homelessness, repetition, trees); more building types (two or three homes, a fun building, a temple distinct from the altar, decorations); roads with their bonus. *Large.*
-8. **Migration replaces the belief meter.** Rival towns with capture thresholds; migrant groups behind a flag the player accepts or refuses; the impress route wins a town and leaves it empty. *Large.*
-9. **Tribute, scrolls, objectives and the toolbar.** Tribute from scrolls and objectives only; a tribute tab that unlocks buildings, miracles and upgrades; construction, objectives and statistics tabs. Lock the miracles and upgrades behind it. *Large.*
-10. **Advisors and the tutorial.** Two advisors of Expedition's own design who teach the first land and argue over challenges. *Large.*
-11. **Creature roles.** Role leashes tied to a building or spot with a drawn area, a free-will bar, a learning menu, the pen, creature miracles and growth. *Large.*
-12. **Miracles complete.** Throw and pour as different effects; shield and meteor; repeat key. *Medium.*
-13. **Armies and the force route.** Armoury flags, swordsmen and archers, flag orders, capture; walls and gates; rival platoons that attack; catapults; creature fights. *Large.*
-14. **Wonders and epics.** The charm first (it serves both routes), then the destructive three; the rival casting epics back. *Large.*
-15. **Several lands.** A chain of islands with carried tribute and creature, each with its own rivals and scarcity. *Large.*
-16. **Optional depth.** Ages and mourning, day and night with a sundial, refineries, hand forcing and gestures, toys, ranks and merging, music.
-
----
-
-## Open questions
-
-These need a decision from the user before the step that depends on them:
-
-1. **Jobs: by hand or automatic?** The reference makes the player assign nearly every job by hand, and reviewers named that micromanagement as its main fault. Keep Expedition's automatic shares with hand overrides, or follow the reference?
-2. **Camera rotation.** Four fixed turns would need every sprite and the terrain drawn from four sides. Add them, or keep one view?
-3. **The belief meter.** Replace it with migration (step 8), or keep it as Expedition's own route beside migration?
-4. **Scale.** Target town sizes on one 64 x 64 island: tens of people, or a larger map for hundreds? This sets every cost and tribute number.
-5. **Several lands or one larger island?** The campaign structure decides how tribute and unlocks pace out.
-6. **The source list.** The URLs contain the reference game's name. They stay out of the repository unless the name gate gets an exception for one file.
+1. **The hand in bulk.** Hold to suck up grain from fields and the store and wood from trees, in amounts that grow while the button is held; drop on the store to deposit and on a blueprint to pay into it; pour onto a blueprint to god-build at extra cost; shake to empty. Multi pick-up for villagers and trees (sweep while holding). This is the complaint the user raised first, and every later system leans on it. Resource amounts move to the reference's scale (hundreds of wood per building). *Size: large.*
+2. **A bigger world and crowds.** A much larger island with room for several rival towns, and an engine that holds hundreds of villagers (later a thousand or more) within the 16.7 ms p95 frame budget: terrain drawn and cached in chunks, the spatial grid and pathfinding sized for crowds, a perf scene with a full-size town. Measure first; the scale decision makes this a precondition for every town system. *Large.*
+3. **One store, ore, regrowing forests.** Merge the storehouse and woodpile into one store for food, wood and ore; add ore rocks and a mine; foresters who replant; seedlings and rain that grow trees. *Medium.*
+4. **Jobs by hand on top of automatic.** A job dropped by hand is permanent and shows its colour; a shake or a drop at the town centre clears it and hands the villager back to automatic assignment. Add the breeder and forester jobs. *Medium.*
+5. **Influence area.** A border round the town that grows with buildings and people; the hand works only inside it; throws can leave it. *Medium.*
+6. **Camera controls.** Move the camera to the right button (grab the land), double-click travel, keys to the town centre and creature. Slap moves to a fast side-to-side stroke over the creature, as the reference does it. Rotation waits for step 16. *Medium.*
+7. **Town centre and wants.** A prebuilt town centre whose statues show the most urgent want and its urgency, a draggable wanted-building blueprint, an information scroll on hover; hover tooltips for buildings and villagers. *Large.*
+8. **Homes, happiness, impressiveness.** Homes with capacity and homelessness; happiness; the impressiveness number with its modifiers (placement, alignment, housing, homelessness, repetition, trees); more building types (two or three homes, a fun building, a temple distinct from the altar, decorations); roads with their bonus. *Large.*
+9. **Migration replaces the belief meter.** Several rival towns on the island, each with a capture threshold; migrant groups behind a flag the player accepts or refuses; the impress route wins a town and leaves it empty. *Large.*
+10. **Tribute, scrolls, objectives and the toolbar.** Tribute from scrolls and objectives only; a tribute tab that unlocks buildings, miracles and upgrades; construction, objectives and statistics tabs. Lock the miracles and upgrades behind it. *Large.*
+11. **Advisors and the tutorial.** Two advisors of Expedition's own design who teach the first part of the island and argue over challenges. *Large.*
+12. **Creature roles.** Role leashes tied to a building or spot with a drawn area, a free-will bar, a learning menu, the pen, creature miracles and growth. *Large.*
+13. **Miracles complete.** Throw and pour as different effects; shield and meteor; repeat key. *Medium.*
+14. **Armies and the force route.** Armoury flags, swordsmen and archers, flag orders, capture; walls and gates; rival platoons that attack; catapults; creature fights. *Large.*
+15. **Wonders and epics.** The conversion epic first (it takes what migration cannot), then the destructive three; the rival casting epics back. *Large.*
+16. **Camera rotation.** Four 90-degree turns, with every sprite and the terrain drawn from four sides. *Large.*
+17. **Optional depth.** Ages and mourning, day and night with a sundial, refineries, hand forcing and gestures, toys, ranks and merging, music, and a chain of islands if one island ever feels too small.
