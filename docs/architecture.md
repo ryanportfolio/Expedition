@@ -194,13 +194,13 @@ Measured on this machine (100 Hz display, 2026-11-02), seed 1, three runs one af
 | | Run A | Run B | Run C | 1,000 + 200 villagers |
 |---|---|---|---|---|
 | Entities at window end | 2,708 | 2,708 | 2,708 | 3,289 |
-| Frame time median / p95 / p99 / max | 10.0 / 10.1 / 10.2 / 20.1 ms | 10.0 / 10.1 / 10.2 / 20.0 ms | 10.0 / 10.1 / 10.2 / 20.0 ms | 10.0 / 10.1 / 10.3 / 20.1 ms |
-| Frames over 16.7 ms | 2 (0.10%) | 1 (0.05%) | 3 (0.15%) | 9 (0.45%) |
-| `game.frame` work, median / p95 | 3.8 / 15.2 ms | 3.8 / 15.2 ms | 3.8 / 15.4 ms | 4.2 / 16.5 ms |
-| Frames that ran a sim tick: work median / p95 / max | 13.2 / 16.8 / 23.0 ms | 13.1 / 16.7 / 22.9 ms | 13.2 / 16.8 / 22.7 ms | 14.2 / 18.1 / 25.2 ms |
-| Effects composite on those frames, back + front (median) | 2.3 + 7.3 ms | 2.2 + 7.3 ms | 2.2 + 7.3 ms | 2.6 + 7.4 ms |
+| Frame time median / p95 / p99 / max | 10.0 / 10.2 / 20.0 / 20.3 ms | 10.0 / 10.1 / 10.3 / 20.1 ms | 10.0 / 10.2 / 10.3 / 30.1 ms | 10.0 / 10.2 / 19.8 / 20.2 ms |
+| Frames over 16.7 ms | 39 (1.99%) | 6 (0.30%) | 12 (0.60%) | 20 (1.01%) |
+| `game.frame` work, median / p95 | 4.5 / 17.7 ms | 4.2 / 16.4 ms | 4.3 / 16.9 ms | 4.4 / 17.3 ms |
+| Frames that ran a sim tick: work median / p95 / max | 15.2 / 20.2 / 26.9 ms | 14.2 / 17.9 / 28.4 ms | 14.5 / 18.6 / 33.0 ms | 14.6 / 19.0 / 25.1 ms |
+| Effects composite on those frames, back + front (median) | 2.3 + 8.3 ms | 2.3 + 7.8 ms | 2.3 + 7.8 ms | 2.6 + 7.7 ms |
 
-Everything else in a render costs about 2.7 ms at 600 villagers: sort and blit 1.5 (about 800 sprites in view), terrain 0.5, systems draw 0.2, overlays 0.2. Sim ticks take about 0.5 ms each.
+Everything else in a render costs about 3 ms at 600 villagers: sort and blit 1.6 (about 800 sprites in view), terrain 0.6, systems draw 0.3, overlays 0.3. Sim ticks take about 0.7 to 0.9 ms each. Rain falls on the player building in view farthest from the first fire; before that rule the farthest building of all was chosen, which in the town stands off screen, and the clouds were not drawn (work p95 was 15.2 ms then).
 
 ### Crowds (step 2)
 
@@ -223,4 +223,4 @@ The effects layer (`src/render/fx.js`) was 11.5 of the 12.8 ms a frame took befo
 
 Checked with a seeded random comparison (296,000 pixels, every alpha and light case, 0 differences) and a node replay of 400 frames with casts, camera pans and an option changed between ticks, rendered through the old and the new layer: the outputs differ only on the two frames where re-rendering after a cast differs in the old layer too. In the scene of that time (fire on houses first, which left every house a wreck about 10 s into the window), p95 went from 20.1 ms to 10.1 ms and the frames over 16.7 ms from 490 to 0.
 
-The margin is on frames that also run a sim tick: those repaint every effect, and pixelfx painting is most of their 12 ms. Their p95 of 16.7 to 16.8 ms (18.1 ms with 1,000 villagers) is at or over a 60 Hz frame. On this 100 Hz display, where a frame lasts 10 ms, the rAF callback that follows such a frame runs late; the check prints those callback gaps too (p95 about 21 to 22 ms here). The rAF timestamps still advance every 10 ms except on the 1 to 9 frames per run that show a 20 ms gap, so p95 holds. A slower CPU would cross 16.7 ms on these frames first.
+The margin is on frames that also run a sim tick: those repaint every effect, and pixelfx painting is most of their 12 ms. Their p95 of 17.9 to 20.2 ms (19.0 ms with 1,000 villagers) is over a 60 Hz frame, and the effects are most of it. On this 100 Hz display, where a frame lasts 10 ms, the rAF callback that follows such a frame runs late; the check prints those callback gaps too (p95 about 21 to 22 ms here). The rAF timestamps still advance every 10 ms except on the 6 to 39 frames per run that show a 20 ms gap, so p95 holds. A slower CPU would cross 16.7 ms on these frames first.

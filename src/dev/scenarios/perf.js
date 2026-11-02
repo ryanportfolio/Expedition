@@ -222,7 +222,11 @@ export default async function perf(t, game) {
   };
   camera.centerOn(view.x, view.y, world.heightAt(view.x, view.y));
   const firstFire = fireTarget() ?? view;
-  const far = player('building').filter((b) => b.type !== 'temple').sort(byDist(firstFire)).at(-1) ?? temple;
+  // rain on the player building in view (cloud included: 80 px pad) farthest from the first fire, so
+  // its clouds are drawn and it does not put the fires out; with a town round the village, the
+  // farthest building of all stands off screen
+  const seen = (b) => inView(camera.worldToView(b.x, b.y, world.heightAt(b.x, b.y)), 80);
+  const far = player('building').filter((b) => b.type !== 'temple' && seen(b)).sort(byDist(firstFire)).at(-1) ?? temple;
   const spots = { rain: { x: far.x, y: far.y }, heal: { x: centre.x, y: centre.y } };
   // lightning: spots on a 1-tile grid round the village centre, nearest first
   const boltGrid = [];
@@ -303,6 +307,7 @@ export default async function perf(t, game) {
   t.assert(burning.length >= 3, `several fires burn (${burning.length} entities burning)`);
   t.assert(v.burningBuildings === 0, `no player building is burning (${v.burningBuildings})`);
   t.assert(M.effects.rains.length >= 1, 'rain is falling');
+  t.assert(seen(spots.rain) && Math.hypot(spots.rain.x - firstFire.x, spots.rain.y - firstFire.y) > TUNING.rain.radius + F.radius, `rain falls in view, clear of the fires (at ${spots.rain.x}, ${spots.rain.y})`);
   t.assert(counts.heal >= 1 && counts.lightning >= 1 && counts.fire >= 1 && counts.rain >= 1, `all four miracles cast (${JSON.stringify(counts)})`);
   t.assert(Object.values(active()).every(Boolean), `all four miracle effects alive (${JSON.stringify(active())})`);
   const tv = camera.worldToView(temple.x, temple.y, world.heightAt(temple.x, temple.y));

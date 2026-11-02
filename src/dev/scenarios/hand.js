@@ -31,8 +31,8 @@ function creatureStandIn() {
   ellipse(s, 15, 11, 5, 6, slate); // hooded head
   rect(s, 6, 20, 4, 24, slate); // arms hang long
   rect(s, 21, 20, 4, 24, slate);
-  rect(s, OX + 11, OY + 44, 3, 27, slate); // legs
-  rect(s, OX + 17, OY + 44, 3, 27, slate);
+  rect(s, 11, 44, 3, 27, slate); // legs
+  rect(s, 17, 44, 3, 27, slate);
   sphereShade(s, 'rock', { lo: 1, hi: 6, cx: 13, cy: 30, rx: 12, ry: 40 });
   rect(s, 13, 11, 5, 3, idx('ink', 0)); // the face stays in shadow
   line(s, 15, 26, 15, 30, idx('fire', 5)); // ember seam in the chest
