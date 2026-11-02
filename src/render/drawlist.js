@@ -1,5 +1,5 @@
 // Draw list: world items collected each frame, sorted by the spec depth key, drawn back to front.
-// Item: { x, y, z, id, sprite, flipX?, lut?, draw? }. With draw(ctx, vx, vy) the item paints itself;
+// Item: { x, y, z, id, sprite, flipX?, lut?, draw?, sortDepth? } (sortDepth: see depthKey in iso.js). With draw(ctx, vx, vy) the item paints itself;
 // otherwise its sprite is blitted with the anchor on the projected point.
 import { compareDepth, worldToScreen } from '../world/iso.js';
 import { blit } from './blit.js';

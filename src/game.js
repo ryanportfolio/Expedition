@@ -7,7 +7,8 @@ import { createInput } from './engine/input.js';
 import { createDisplay } from './engine/display.js';
 import { createCamera } from './engine/camera.js';
 import { createWorld } from './world/world.js';
-import { pickTile } from './world/iso.js';
+import { pickSurface } from './world/iso.js';
+import { surfaceHeights } from './terrain/cache.js';
 import { createRenderer } from './render/renderer.js';
 import { createFxLayer } from './render/fx.js';
 import * as terrain from './systems/terrain.js';
@@ -28,7 +29,7 @@ export function createGame({ seed = 1, canvas = null, worldSize = 64 } = {}) {
   const world = createWorld({ w: worldSize, h: worldSize });
   const input = createInput(events);
   const display = createDisplay(canvas);
-  const camera = createCamera({ display, input, world });
+  const camera = createCamera({ display, input, world, events });
   const game = {
     world, events, input, display, camera,
     rng: createRng(seed),
@@ -68,9 +69,26 @@ export function createGame({ seed = 1, canvas = null, worldSize = 64 } = {}) {
     },
     stop() { game.running = false; },
   };
+  // The pointer picks against the surface the terrain pass draws (pickSurface in world/iso.js has
+  // the why), at the center of the world pixel under it. The tile heights are rebuilt when the map
+  // changes: world.loadMap swaps the height and ground arrays; an in-place edit of them must call
+  // game.surface.invalidate() (terrain.invalidate() does), as the terrain cache needs too.
+  let surface = null;
+  game.surface = {
+    get() {
+      if (!surface || surface.height !== world.height || surface.ground !== world.ground || surface.seaLevel !== world.seaLevel || surface.w !== world.w || surface.h !== world.h) {
+        const surf = surfaceHeights(world);
+        let max = 0;
+        for (let i = 0; i < surf.length; i++) if (surf[i] > max) max = surf[i];
+        surface = { surf, w: world.w, h: world.h, max, height: world.height, ground: world.ground, seaLevel: world.seaLevel };
+      }
+      return surface;
+    },
+    invalidate() { surface = null; },
+  };
   input.toWorld = (sx, sy) => {
     const p = camera.viewToWorldPx(sx, sy);
-    return pickTile(p.sx, p.sy, world.heightAt, { w: world.w, h: world.h });
+    return pickSurface(p.sx + 0.5, p.sy + 0.5, game.surface.get());
   };
   game.renderer = createRenderer(game);
   for (const name of SYSTEM_ORDER) game.systems[name] = MODULES[name].create(game);

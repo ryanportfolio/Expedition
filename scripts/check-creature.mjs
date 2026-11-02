@@ -13,7 +13,9 @@
 // one log short of a two-log load (one goes in, one is set down). Rocks: a rock the hand moved is
 // offered only where it lies, and throwing it leaves one rock entity and the map's rock list. Untrained defaults on seeds 13, 21, 4 (harm limits,
 // grain over villagers, temples stand) and training on the same seeds (slapped twice: no harmful act
-// again at hunger 1; stroked: eat:villager often). Runtime traps: Math.random and the browser globals
+// again at hunger 1, and the key was offered to the brain; stroked: eat:villager often). Round 43: a
+// slap mid eat or throw of a villager stops the act and sets the villager down alive, and a stroke at
+// a haul delivery credits haul:wood as a fresh act. Runtime traps: Math.random and the browser globals
 // (document, window, requestAnimationFrame, localStorage, HTMLCanvasElement, Image) are counted from
 // before the game modules load through the seed 1 trial; both counts must stay 0, and a planted
 // access shows the traps count. The creature sources are also scanned for Math.random and DOM names.
@@ -229,10 +231,22 @@ function trainedRun(seed, key, feedback, hunger) {
   };
   feed();
   const forced = n;
+  // Round 43: the slap runs must give the brain the chance to choose the key, or "never again" cannot
+  // fail. The untrained restraint (restrain() in src/systems/creature.js) drops eat:villager whenever
+  // eat:grain is on offer, which on the island is always, so before this the key reached the brain 0
+  // times. In the eat:villager slap runs grain is filtered out of the free minutes (any
+  // candidateFilter also turns the restraint off), and every slap run counts the decisions that
+  // offered the key to brain.choose; the check below wants at least one.
+  if (feedback === 'slap' && key === 'eat:villager') cs.debug.candidateFilter = (c) => c.key !== 'eat:grain';
+  let offered = 0;
+  const choose = cs.brain.choose;
+  cs.brain.choose = (list, now) => { if (list.some((c) => c.key === key)) offered++; return choose(list, now); };
   cs.debug.holdHunger = hunger;
   for (let i = 0; i < 240 * 30; i++) { game.tick(STEP); feed(); }
   cs.debug.holdHunger = null;
-  return { forced, after: n - forced, forbidden: cs.brain.isForbidden(key) };
+  cs.brain.choose = choose;
+  cs.debug.candidateFilter = null;
+  return { forced, after: n - forced, forbidden: cs.brain.isForbidden(key), offered };
 }
 for (const key of HARM) {
   const hunger = key === 'eat:villager' ? 0.8 : 0; // a meal needs hunger; throwing and smashing need boredom only
@@ -243,9 +257,71 @@ for (const key of HARM) {
       check(plain.forced === 1 && stroked.forced === 1 && stroked.after >= 4 && stroked.after >= 3 * Math.max(1, plain.after),
         `seed ${seed}: stroked after each ${key}, it learns to do it often (${stroked.after} in 4 sim minutes vs ${plain.after} with no feedback)`);
     }
-    check(slapped.forced === 1 && slapped.after === 0 && slapped.forbidden,
-      `seed ${seed}: slapped twice after ${key}, never again in 4 sim minutes at hunger 1 (${slapped.after}, forbidden ${slapped.forbidden})`);
+    check(slapped.forced === 1 && slapped.after === 0 && slapped.forbidden && slapped.offered >= 1,
+      `seed ${seed}: slapped twice after ${key}, never again in 4 sim minutes at hunger 1 (${slapped.after}, forbidden ${slapped.forbidden}, offered to the brain in ${slapped.offered} decisions)`);
   }
+}
+
+// ---- a slap mid-act stops it (round 43). Slapped while it holds a villager in the eat or throw
+// pose, the act is forbidden and is not finished: the villager is set down alive. Before, the slap
+// forbade the key for later choices only, and the act under way still killed the villager. Seeds 1-2.
+for (const key of ['eat:villager', 'throw:villager']) for (const seed of [1, 2]) {
+  const game = newGame(seed);
+  const { world, events } = game;
+  const cs = game.systems.creature;
+  cs.debug.candidateFilter = (c) => c.key === key;
+  let slapped = null, after = 0;
+  events.on('act', (a) => { if (slapped && a.actor === 'creature' && keyOf(a) === key) after++; });
+  for (let i = 0; i < 120 * 30 && !slapped; i++) {
+    game.tick(STEP);
+    const st = cs.state();
+    if (st.action?.key === key && st.action.phase === 'do') {
+      slapped = { victim: world.get(st.action.target.id) };
+      events.emit('slap', { creatureId: cs.entity.id, strength: 1 });
+    }
+  }
+  for (let i = 0; i < 6 * 30; i++) game.tick(STEP);
+  cs.debug.candidateFilter = null;
+  const v = slapped?.victim;
+  const last = [...cs.history].reverse().find((r) => r.key === key && r.phase !== 'choose');
+  const down = v && world.get(v.id) === v && v.hp > 0 && !(v.dying > 0) && !v.held && !v.carriedBy && Math.abs(v.z - world.heightAt(v.x, v.y)) < 1e-6;
+  check(slapped && cs.brain.isForbidden(key) && after === 0 && down && last?.phase === 'abort:forbidden',
+    `seed ${seed}: slapped mid-${key}, the act stops (${slapped ? `${after} finished after the slap, last ${last?.phase}, villager ${v ? (down ? 'set down alive' : `hp ${v.hp}, held ${!!v.held}, dying ${v.dying ?? 0}`) : 'gone'}` : 'never reached the pose'})`);
+}
+
+// ---- credit for a haul lands at delivery (round 43). The player strokes the creature when it puts
+// the wood in, after a walk of several seconds with the load. Before, the brain's credit time was the
+// pickup (the first arrival), so a stroke at delivery came 8-9 s later and credit, which decays
+// exp(-age / creditTau) and ends at creditWindow, moved haul:wood by about 0.01 of the 0.1 a fresh
+// act gets (water:field got 0.053). Multi-stage acts now take their credit time from completion.
+// Seeds 1-3: a far player blueprint that keeps needing wood, only haul:wood offered, one full stroke
+// the tick after the delivery: the haul:wood aggregate rises by at least 0.9 of the zero-age amount
+// (learnRate * aggregateRate * salience 1), so the credit is under half a second old.
+for (const seed of [1, 2, 3]) {
+  const game = newGame(seed);
+  const { world, events } = game;
+  const vs = game.systems.village, cs = game.systems.creature;
+  const vc = world.sites.village;
+  let id = null;
+  for (let r = 2; r <= 8 && id === null; r++)
+    for (let dy = -r; dy <= r && id === null; dy++)
+      for (let dx = -r; dx <= r && id === null; dx++)
+        if (Math.max(Math.abs(dx), Math.abs(dy)) === r && vs.validate('house', vc.x + dx, vc.y + dy).ok) id = vs.placeBlueprint('house', vc.x + dx, vc.y + dy);
+  world.get(id).woodCost = 1000; // keeps needing wood, so every haul goes to it
+  cs.debug.candidateFilter = (c) => c.key === 'haul:wood';
+  const agg = () => cs.brain.table().aggregates.find((x) => x.key === 'haul:wood')?.score ?? 0;
+  let delivered = null;
+  events.on('act', (a) => { if (a.actor === 'creature' && a.verb === 'haul' && !delivered) delivered = { t: cs.time }; });
+  let delta = null;
+  for (let i = 0; i < 180 * 30 && delta === null; i++) {
+    game.tick(STEP);
+    if (delivered) { const a0 = agg(); events.emit('stroke', { creatureId: cs.entity.id, strength: 1 }); delta = agg() - a0; }
+  }
+  cs.debug.candidateFilter = null;
+  const P = cs.brain.params, full = P.learnRate * P.aggregateRate;
+  const start = cs.history.find((h) => h.key === 'haul:wood' && h.phase === 'start');
+  check(delta !== null && delta >= 0.9 * full,
+    `seed ${seed}: a stroke at the haul delivery (${start && delivered ? `${(delivered.t - start.t).toFixed(1)} s after the pickup` : 'no delivery'}) moves haul:wood by ${delta?.toFixed(3)} (want >= ${(0.9 * full).toFixed(3)}, zero-age ${full.toFixed(3)})`);
 }
 
 // ---- movement sampler self-test: it must catch a planted cliff jump and a water tile

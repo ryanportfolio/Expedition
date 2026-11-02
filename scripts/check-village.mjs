@@ -6,7 +6,9 @@
 // abuse; recovery after fire (a rock dropped on a lost building's spot; no re-placed blueprint
 // covers a rock), settlers, fire on the village every 60 s, and stone temples. Round 39: placement
 // tests live rocks (a moved rock frees its map tile and blocks its new one), and villagers never
-// pick up wood or fell trees that are airborne or sinking. Exits 1 and prints each failing check.
+// pick up wood or fell trees that are airborne or sinking. Round 43: temples survive lightning and
+// fire and worship resumes, wood or grain the hand takes from a carrier is picked up again, and
+// unbuilt blueprints do not extend the village influence. Exits 1 and prints each failing check.
 //
 //   node scripts/check-village.mjs
 import { createGame } from '../src/game.js';
@@ -15,6 +17,7 @@ import { createRng } from '../src/engine/rng.js';
 import { VILLAGE } from '../src/village/config.js';
 import { createPaths } from '../src/village/path.js';
 import { HAND } from '../src/hand/tunables.js';
+import { CREATURE } from '../src/creature/tunables.js';
 import { liveRocks } from '../src/systems/terrain.js';
 
 const fails = [];
@@ -328,7 +331,7 @@ function longRun(seed) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 7. Wrecks: a new blueprint on a wrecked building clears the wreck; a wrecked temple stays.
+// 7. Wrecks: a new blueprint on a wrecked building clears the wreck; a temple set to hp 0 stands.
 {
   const game = newGame();
   const vs = game.systems.village;
@@ -347,12 +350,16 @@ function longRun(seed) {
   game.clock.run(30, game.tick);
   check(log['building-destroyed'].length === 1, `clearing a wreck does not fire building-destroyed again (${log['building-destroyed'].length})`);
 
+  // Round 43 changed this rule. Before, a temple set to hp 0 was wrecked like any building and this
+  // check asserted that the wreck still blocked blueprints. Nothing ever repaired a temple, so a wreck
+  // ended worship for good. Now every hp write on a temple stops at VILLAGE.templeMinHp (stoneHp in
+  // src/village/sim.js): hp 0 leaves it standing at the floor, and it still blocks blueprints.
   const temple = buildings(game, 'player', 'temple')[0];
   temple.hp = 0;
   game.tick(1 / 30);
   const tx = temple.tx + 1, ty = temple.ty + 1;
-  check(temple.stage === 'wrecked' && vs.validate('house', tx, ty).reason === 'overlaps a building' && game.world.get(temple.id),
-    `a wrecked temple still blocks blueprints (${vs.validate('house', tx, ty).reason})`);
+  check(temple.stage === 'done' && Math.abs(temple.hp - VILLAGE.templeMinHp) < 1e-9 && vs.validate('house', tx, ty).reason === 'overlaps a building' && game.world.get(temple.id),
+    `a temple set to hp 0 stands at the floor (${temple.stage}, hp ${temple.hp}) and still blocks blueprints (${vs.validate('house', tx, ty).reason})`);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -889,7 +896,8 @@ const overlaps = (game) => {
 // ---------------------------------------------------------------------------------------------
 // 16. Temples are stone (VILLAGE.templeMinHp): rocks thrown through the hand and the creature's
 // smash chip the player and rival temples but never take them to hp 0 or wreck them. Control: the
-// same throws wreck a house. (A temple set to hp 0 directly still wrecks: section 7.)
+// same throws wreck a house. (Since round 43 no hp write takes a temple below the floor: hp 0 set
+// directly in section 7, lightning and fire in "temples survive lightning and fire" below.)
 {
   const game = newGame(2);
   const { world } = game;
@@ -1102,6 +1110,98 @@ const overlaps = (game) => {
   const control = [...before].filter((id) => !world.get(id)).length;
   check(air === 0 && sink === 0 && control > 0,
     `in flight: no tree felled while every tree is airborne (${air}) or sinking (${sink}) for 30 s; ${control} felled in the next 60 s once they are not`);
+}
+
+// ---- temples survive lightning and fire (round 43). Before, a temple at hp 0 was wrecked like any
+// building and nothing repaired it; worshippers pray only at a usable temple, so power stopped for
+// good. One lightning bolt (buildingDamage 0.5 plus the fire it lights) took a fresh temple to 0, and
+// so did a fire on a temple one creature smash had chipped to 0.5. Every hp write on a temple now
+// stops at VILLAGE.templeMinHp (stoneHp in src/village/sim.js). Seeds 1-3, both cases, free casts:
+// the temple catches fire, never drops below the floor or wrecks, the fire goes out, and in the two
+// minutes after that worship earns power again.
+for (const seed of [1, 2, 3]) {
+  for (const how of ['lightning', 'smash then fire']) {
+    const game = newGame(seed);
+    const log = record(game);
+    const t = buildings(game, 'player', 'temple')[0];
+    game.clock.run(30 * 30, game.tick);
+    if (how === 'lightning') game.systems.miracles.cast('lightning', t.x, t.y, { free: true });
+    else { t.hp = 1 - CREATURE.smashDamage; game.systems.miracles.cast('fire', t.x, t.y, { free: true }); }
+    let low = t.hp, burnt = false;
+    for (let i = 0; i < 40 * 30; i++) { game.tick(1 / 30); low = Math.min(low, t.hp); burnt ||= t.burning > 0; }
+    const p0 = game.state.power;
+    game.clock.run(2 * MIN, game.tick);
+    const gain = game.state.power - p0;
+    const wrecked = log['building-destroyed'].some((p) => p.buildingId === t.id);
+    check(burnt && low >= VILLAGE.templeMinHp - 1e-9 && t.stage === 'done' && !wrecked && !(t.burning > 0) && gain > 0,
+      `seed ${seed}, ${how} on the player temple: burnt ${burnt}, lowest hp ${low.toFixed(3)} (floor ${VILLAGE.templeMinHp}), ${t.stage}, fire out ${!(t.burning > 0)}, power +${gain.toFixed(2)} in the next 2 minutes`);
+  }
+}
+
+// ---- the hand takes wood or grain out of a villager's arms (round 43). The item stops being
+// carried (its carriedBy and the carrier's carry are cleared), so once it is set down a villager
+// picks it up again. Before, carriedBy kept naming the old carrier, and villagers (looseNear,
+// pickUp) and the creature skip any item with carriedBy set, so it lay there for good. Seeds 1-2.
+for (const kind of ['wood', 'grain']) for (const seed of [1, 2]) {
+  const game = newGame(seed);
+  const { world, events } = game;
+  let it = null;
+  for (let i = 0; i < 5 * MIN && !it; i++) {
+    game.tick(1 / 30);
+    it = world.query({ kind }).find((w) => w.carriedBy && world.get(w.carriedBy)?.owner === 'player');
+  }
+  if (!check(it, `grab from arms (${kind}, seed ${seed}): found a player villager carrying ${kind}`)) continue;
+  const carrier = world.get(it.carriedBy);
+  it.held = true; it.airborne = false; // as hand.grab sets them before it emits grab
+  events.emit('grab', { entityId: it.id, kind, x: it.x, y: it.y, z: it.z });
+  const freed = it.carriedBy === null && carrier.carry === null;
+  for (let i = 0; i < 15; i++) game.tick(1 / 30);
+  // a gentle drop one tile toward the village centre, as hand.release does for a slow release
+  const s = world.sites.village;
+  const dx = Math.sign(s.x + 0.5 - it.x), dy = Math.sign(s.y + 0.5 - it.y);
+  world.move(it, it.x + dx, it.y + dy, world.heightAt(it.x + dx, it.y + dy) + 0.5);
+  it.held = false;
+  game.systems.hand.launch(it, 0, 0, 0, false);
+  events.emit('release', { entityId: it.id, kind, x: it.x, y: it.y, z: it.z, vx: 0, vy: 0, vz: 0 });
+  // picked up: delivered (gone), or carried by a villager whose carry names it
+  const picked = () => { const c = it.carriedBy && world.get(it.carriedBy); return !world.get(it.id) || (c?.kind === 'villager' && c.carry === it.id); };
+  let t = 0;
+  for (; t < 3 * MIN && !picked(); t++) game.tick(1 / 30);
+  check(freed && picked(),
+    `grab from arms (${kind}, seed ${seed}): taking it frees it (carriedBy ${it.carriedBy === null ? 'cleared' : it.carriedBy}, ${freed ? 'freed at the grab' : 'still carried after the grab'}) and a villager picks it up again (${picked() ? `after ${(t / 30).toFixed(0)} s` : 'not within 3 minutes'})`);
+}
+
+// ---- blueprints do not extend the village influence (round 43). A blueprint may go within
+// buildingInfluenceR of a finished building of ours (or within influenceR of the temple), not of an
+// unbuilt blueprint. Before, any building not wrecked counted, so blueprints placed one from the next
+// chained across the island without anything being built (6 woodpile blueprints reached 2.8 tiles
+// from the rival centre). Seed 1: a woodpile blueprint on the in-range spot farthest from the
+// temple; a spot near it that was out of range stays out of range while it is a blueprint and is
+// accepted once it counts as finished (stage set to 'done' for the test), so that spot fails only on
+// influence.
+{
+  const game = newGame(1);
+  const vs = game.systems.village;
+  const { world } = game;
+  const temple = buildings(game, 'player', 'temple')[0];
+  let far = null;
+  for (let ty = 1; ty < W - 1; ty++) for (let tx = 1; tx < W - 1; tx++) {
+    const d = Math.hypot(tx + 0.5 - temple.x, ty + 0.5 - temple.y);
+    if ((!far || d > far.d) && vs.validate('woodpile', tx, ty).ok) far = { tx, ty, d };
+  }
+  const R = Math.ceil(VILLAGE.buildingInfluenceR);
+  const out = [];
+  for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++)
+    if (vs.validate('woodpile', far.tx + dx, far.ty + dy).reason === 'out of range (outside the village influence)') out.push([far.tx + dx, far.ty + dy]);
+  const b = world.get(vs.placeBlueprint('woodpile', far.tx, far.ty));
+  const reason = (p) => vs.validate('woodpile', p[0], p[1]).reason;
+  b.stage = 'done';
+  const spot = out.find((p) => reason(p) === null);
+  const whenDone = spot && reason(spot);
+  b.stage = 'blueprint';
+  const whenBlueprint = spot && reason(spot);
+  check(b && spot && whenBlueprint === 'out of range (outside the village influence)' && whenDone === null,
+    `blueprint influence: tile ${spot} beside a woodpile blueprint ${far.d.toFixed(1)} tiles from the temple is "${whenBlueprint ?? 'ok'}" while it is a blueprint and "${whenDone ?? 'ok'}" once finished`);
 }
 
 console.log(`check-village: ${passes} passed, ${fails.length} failed`);

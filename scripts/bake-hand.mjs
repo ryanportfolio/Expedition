@@ -60,10 +60,10 @@ const POSES = {
   stroke: { anchor: [240, 150], wrist: { at: [62, 60], dir: [-1, -0.6], len: 7 } },
   slap: { anchor: [235, 195], wrist: { at: [72, 52], dir: [-1, -0.9], len: 7 } },
 };
-const BODY_LUM = 95;
-const LIFT = 12; // the reduction averages rim light with shading; lift the mean lightness this much before matching a shade // body: source lightness above this, blue-white
-const MOTE_LUM = 120;
-const HALO = 4; // shade of the dithered 1 px halo // loose motes and lines: source lightness above this
+const BODY_LUM = 95; // body: source lightness above this, blue-white
+const LIFT = 12; // the reduction averages rim light with shading; lift the mean lightness this much before matching a shade
+const MOTE_LUM = 120; // loose motes and lines: source lightness above this
+const HALO = 4; // shade of the dithered 1 px halo
 
 const lum = (r, g, b) => 0.3 * r + 0.59 * g + 0.11 * b;
 const hexRGB = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };

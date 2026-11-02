@@ -241,8 +241,16 @@ export function createBrain({ rng, params, state } = {}) {
     if (recent.length > P.creditMaxActions) recent = recent.slice(-P.creditMaxActions);
   }
 
-  function completeAction(key, satisfies) {
+  // `now` (optional): the action's credit time moves to `now`. For an act of more than one stage the
+  // caller records it when it starts and passes `now` when it finishes, so feedback given at the
+  // finish (a haul's delivery, seconds after the pickup) is credited as fresh. Only the newest
+  // recent entry for `key` is re-stamped, in place.
+  function completeAction(key, satisfies, now) {
     splitKey(key);
+    if (now !== undefined) {
+      finite('now', now);
+      for (let i = recent.length - 1; i >= 0; i--) if (recent[i].key === key) { recent[i].t = now; break; }
+    }
     const s = satisfies || lastSatisfies.get(key);
     if (s) for (const n of NEEDS) if (s[n]) needs[n] = clamp(needs[n] - finite(`satisfies.${n}`, s[n]), 0, 1);
     updateWeak(0);

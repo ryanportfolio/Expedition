@@ -102,7 +102,7 @@ export function create(game) {
     /** The cache for the current map (built on demand). */
     get cache() { return current(); },
     /** Drop the cache, e.g. after editing world.height in place. */
-    invalidate() { cache = null; },
+    invalidate() { cache = null; game.surface?.invalidate(); }, // the pointer pick reads the same heights
     update(dt) { syncRocks(); },
     draw(ctx) {},
   };

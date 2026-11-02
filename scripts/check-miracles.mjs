@@ -1,7 +1,8 @@
 // Miracles check, node only (no browser). Runs the shared drive from src/miracles/testbed.js on
 // createGame() (orbs, each miracle cast through the hand path, fizzle, respawn, power accounting),
 // then: fire spread is deterministic for a seed, burning stops under rain and stays out, costs and
-// power accounting are exact, and the miracles update never touches the DOM.
+// power accounting are exact, the pedestals follow the player temple building (not the map's temple
+// site) at its base height, and the miracles update never touches the DOM.
 //
 //   node scripts/check-miracles.mjs
 //
@@ -235,6 +236,45 @@ function fireRun(seed, { rainAt = null } = {}) {
   delete game.state.power;
   assert(M.cast('rain', 30, 30) === false && game.state.power === undefined, 'missing power counts as 0 and is not created');
   nodeT(game).step(12);
+}
+
+// ---- 4b. pedestals follow the player temple building, not the map's temple site
+// On the island the site is too steep and the village builds the temple one tile west. The orbs start
+// round the site (no temple yet), move onto the temple's painted stones at its base height once the
+// village has built it, and leave a held orb where the hand has it.
+{
+  const game = watch(createGame({ seed: 2 }));
+  game.world.loadMap(buildIsland());
+  const t = nodeT(game), W = game.world, M = game.systems.miracles, O = TUNING.orbs;
+  const site = W.sites.temple;
+  t.step(0.1);
+  const at = (m) => W.get(M.orbs.orbOn(m));
+  const offFrom = (c, m) => { const o = at(m); return o ? [o.x - c.x, o.y - c.y] : null; };
+  const matches = (c) => M.orbs.pedestals.every((p) => {
+    const d = offFrom(c, p.miracle), want = O.pedestals[p.miracle];
+    return d && Math.abs(d[0] - want[0]) < 1e-9 && Math.abs(d[1] - want[1]) < 1e-9;
+  });
+  assert(matches({ x: site.x + 0.5, y: site.y + 0.5 }), 'no temple building: orbs stand round the temple site tile');
+  const held = at('fire');
+  game.events.emit('grab', { entityId: held.id, x: held.x, y: held.y, z: held.z, vx: 0, vy: 0, vz: 0 });
+  held.held = true;
+  const heldAt = [held.x, held.y];
+  game.systems.village.setup();
+  const temple = W.query({ kind: 'building' }).find((b) => b.type === 'temple' && b.owner === 'player');
+  assert(temple && Math.hypot(temple.x - (site.x + 0.5), temple.y - (site.y + 0.5)) > 0.5, `the village built the temple off its site (${temple && [temple.x, temple.y]} vs site ${site.x + 0.5}, ${site.y + 0.5})`);
+  t.step(1 / 30);
+  const others = ['rain', 'heal', 'lightning'];
+  assert(others.every((m) => { const d = offFrom(temple, m), w = O.pedestals[m]; return d && Math.abs(d[0] - w[0]) < 1e-9 && Math.abs(d[1] - w[1]) < 1e-9; }),
+    `once the temple stands, the waiting orbs move onto its pedestals (${others.map((m) => `${m} ${offFrom(temple, m)?.map((v) => +v.toFixed(2))}`).join('; ')})`);
+  assert(others.every((m) => Math.abs(at(m).z - (temple.z + O.hover)) <= O.bobAmp + 1e-9),
+    `they float ${O.hover} above the temple base (z ${temple.z}), not over the ground under each stone (${others.map((m) => `${m} ${at(m).z.toFixed(2)}`).join('; ')})`);
+  assert(W.get(held.id) && held.x === heldAt[0] && held.y === heldAt[1], 'a held orb stays in the hand when the pedestals move');
+  held.held = false;
+  game.events.emit('release', { entityId: held.id, kind: 'orb', miracle: 'fire', x: held.x, y: held.y, z: held.z, vx: 0, vy: 0, vz: 0 });
+  game.state.power = 0;
+  t.step(O.respawn + 0.2);
+  const fresh = offFrom(temple, 'fire');
+  assert(fresh && Math.abs(fresh[0] - O.pedestals.fire[0]) < 1e-9 && Math.abs(fresh[1] - O.pedestals.fire[1]) < 1e-9, `the fire orb respawns on the temple's stone (${fresh})`);
 }
 
 // ---- 5. update never touched a browser global

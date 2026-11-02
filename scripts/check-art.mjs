@@ -332,7 +332,8 @@ check('neutral ramps identical across all 17 alignments', neutralSame);
   check('IHDR', ih.readUInt32BE(0) === w && ih.readUInt32BE(4) === h && ih[8] === 8 && ih[9] === 6 && ih[12] === 0);
   const raw = inflateSync(Buffer.concat(chunks.filter((c) => c.type === 'IDAT').map((c) => c.data)));
   eq('IDAT size', raw.length, h * (w * 4 + 1));
-  // This decoder reads rows as-is, which is only valid for filter type 0 (None) on every row.
+  // The encoder's default (no options) stores every row unfiltered: filter type 0 (None). The raw
+  // row reads below rely on that; decodePNG (tested further down) handles every filter type.
   check('PNG rows use filter 0', [...Array(h).keys()].every((y) => raw[y * (w * 4 + 1)] === 0));
   const pix = (x, y) => [...raw.subarray(y * (w * 4 + 1) + 1 + x * 4, y * (w * 4 + 1) + 1 + x * 4 + 4)];
   check('PNG pixels round trip', JSON.stringify(pix(0, 0)) === JSON.stringify([0, 255, 0, 255])
