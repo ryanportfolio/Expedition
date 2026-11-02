@@ -54,8 +54,10 @@ export const HAND = {
   multiPickup: true, // sweeping across villagers or trees with the button down holds several (an upgrade once tribute exists)
   multiKinds: ['villager', 'tree'], // never rocks, orbs or piles
   multiMax: 40,
+  sweepStart: 8, // view px the pointer must move from the press before the sweep adds anything
   spread: [[0, 0], [0.35, -0.2], [-0.3, 0.25], [0.2, 0.4], [-0.4, -0.3]], // tiles: where the first held things ride round the grip; the rest ride on the first
   treeDrawDelay: 0.3, // s: a press held still this long on a tree draws its wood out instead of pulling the tree up
+  drawDelay: 0.2, // s: a press on a field or store draws nothing before this (a click takes nothing)
   draw: { start: 40, ramp: 2, max: 800 }, // units/s drawn from a field, store or tree: start x (1 + ramp x seconds drawing), capped
   pour: { start: 60, ramp: 2, max: 900 }, // wood/s poured into a site to god-build it, same shape
   pourDelay: 0.3, // s the hand stays over a site with wood (or holds the button over a held group) before pouring starts

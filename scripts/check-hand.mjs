@@ -599,11 +599,16 @@ section('the hand in bulk', () => {
 
   // grain: hold on a ripe field, carry to the storehouse, let go
   field.growth = 1;
-  moveTo(over(field)); s.down(0); step(0.4);
+  // a click on the field takes nothing (drawing starts after drawDelay)
+  moveTo(over(field)); s.down(0); s.up(0); step(1 / 30);
+  ok(!H.held.length && field.growth === 1 && !world.query({ kind: 'grain' }).some((e) => e.madeBy === 'hand'), 'a click on a field draws nothing');
+  s.down(0); step(HAND.drawDelay + 0.3);
   const early = H.load?.amount ?? 0;
   step(0.4);
   const grain = H.load;
-  ok(grain && grain.kind === 'grain' && grain.amount > early && early > 0, `holding on a field draws grain, more the longer it is held (${early} after 0.4 s, ${grain?.amount} after 0.8 s)`);
+  // the rate grows while the button is held: the second window draws faster than the first
+  const r1 = early / 0.3, r2 = ((grain?.amount ?? 0) - early) / 0.4;
+  ok(grain && grain.kind === 'grain' && early > 0 && r2 > 1.3 * r1, `holding on a field draws grain, faster the longer it is held (${r1.toFixed(0)}/s in the first 0.3 s, ${r2.toFixed(0)}/s in the next 0.4 s)`);
   // the field keeps growing while it is drawn from (by under 0.04 in 0.8 s, tended)
   ok(grain && field.growth >= 1 - grain.amount / VILLAGE.fieldYield && field.growth < 1 - grain.amount / VILLAGE.fieldYield + 0.04, `the field's crop falls by what was drawn (growth ${field.growth.toFixed(3)} after ${grain?.amount} drawn)`);
   const g0 = store.grain;
@@ -668,14 +673,31 @@ section('the hand in bulk', () => {
   moveTo(middle(group[0])); s.down(0); step(1 / 30);
   for (const v of group.slice(1)) { moveTo(middle(v)); step(1 / 30); }
   ok(H.held.length === 3 && group.every((v) => v.held), `sweeping across villagers holds all three (${H.held.length})`);
+  step(0.2); // the hand comes to rest: a slow release
   s.up(0); step(1 / 30);
-  ok(H.stowed && H.held.length === 3, 'a group stays in the hand when the button is let go');
-  moveTo(at(vx, vy + 2)); s.down(0); s.up(0); step(1 / 30);
+  ok(H.stowed && H.held.length === 3 && group.every((v) => v.held), 'a group stays in the hand when the button is let go slowly');
+  moveTo(at(vx, vy + 2)); step(0.2); s.down(0); s.up(0); step(1 / 30);
   ok(H.held.length === 2 && group.filter((v) => !v.held).length === 1, `a click puts one out (${H.held.length} left)`);
   s.down(0);
   for (let i = 0; i < 30 && H.held.length; i++) step(1 / 30);
   s.up(0); step(1 / 30);
   ok(!H.held.length && !H.stowed && group.every((v) => !v.held), 'holding the button pours the rest out');
+  step(1);
+  // a flick throws a whole group; a press on two overlapping villagers takes only the front one
+  for (const [i, v] of group.entries()) { v.path = null; v.work = null; v.wait = 5; world.move(v, vx + i * 0.8, vy, world.heightAt(vx + i * 0.8, vy)); }
+  step(1 / 30);
+  moveTo(middle(group[0])); s.down(0); step(1 / 30);
+  for (const v of group.slice(1)) { moveTo(middle(v)); step(1 / 30); }
+  const nGroup = H.held.length;
+  f.flick(1, 0, 10);
+  step(1 / 30);
+  ok(nGroup === 3 && !H.held.length && group.every((v) => !v.held && v.airborne), `a flick throws the whole group (${nGroup} held, then ${H.held.length}; airborne ${group.filter((v) => v.airborne).length})`);
+  step(2);
+  for (const v of group.slice(0, 2)) { v.path = null; v.work = null; v.wait = 5; world.move(v, vx, vy, world.heightAt(vx, vy)); }
+  step(1 / 30);
+  moveTo(middle(group[0])); s.down(0); step(0.2);
+  ok(H.held.length === 1, `a press on two villagers standing on one spot holds one (${H.held.length})`);
+  step(0.2); s.up(0); step(1);
 
   // multi pick-up of trees, let go over the woodpile: all their wood goes in at once
   const trees = [0, 1, 2].map((i) => sp('tree', store.x - 3 + i * 0.9, store.y - 3, { sprite: getSprite('test-tree'), species: 'broad', growth: 1, grabbable: true }));
@@ -708,11 +730,53 @@ section('the hand in bulk', () => {
   ok(!H.held.length && seen.shake.length === 1 && !v2.held, `shaking empties the hand (${seen.shake.length} shake)`);
   s.up(0); step(1 / 30);
   ok(!H.held.length, 'letting go after a shake drops nothing more');
+  // a slow back-and-forth keeps what is held
+  moveTo(middle(rocks[0])); s.down(0); step(1 / 30);
+  for (let i = 0; i < 30; i++) { s.move(p.sx + (i % 2 ? -14 : 14), p.sy); step(2 / 30); } // 14 px moves at 210 px/s
+  ok(H.heldId === rocks[0].id && seen.shake.length === 1, `a slow wiggle does not shake (held ${H.held.length}, ${seen.shake.length} shake)`);
+  s.up(0); step(1);
+  // shaken mid-draw with the button still down: the hand stays empty
+  field.growth = 1;
+  for (const v of people) if (v.job === 'farmer') { v.path = null; v.work = null; v.wait = 5; world.move(v, store.x + 6, store.y + 6, world.heightAt(store.x + 6, store.y + 6)); }
+  moveTo(over(field)); s.down(0); step(HAND.drawDelay + 0.4);
+  const drew = H.load?.amount ?? 0;
+  for (let i = 0; i < 12 && H.held.length; i++) { s.move(p.sx + (i % 2 ? -40 : 40), p.sy); step(1 / 30); }
+  const g1 = f.log.length;
+  step(1);
+  ok(drew > 0 && !H.held.length && !f.since(g1).some((e) => e.type === 'grab'), `shaken mid-draw, the hand stays empty while the button is held (drew ${drew}, holds ${H.held.length})`);
+  s.up(0); step(1 / 30);
   // Escape empties it too
   moveTo(middle(rocks[0])); s.down(0); step(1 / 30);
   s.keyDown('Escape'); s.keyUp('Escape'); step(1 / 30);
-  ok(!H.held.length && seen.shake.length === 2, 'Escape empties the hand');
+  ok(!H.held.length && seen.shake.length === 3, 'Escape empties the hand');
   s.up(0); step(1 / 30);
+  // Esc with the hand full keeps a creature selected; with it empty clears the selection
+  const c = sp('creature', store.x + 4, store.y - 4);
+  step(1 / 30);
+  game.state.selectedCreature = c.id;
+  moveTo(middle(rocks[0])); s.down(0); step(1 / 30);
+  s.keyDown('Escape'); s.keyUp('Escape'); step(1 / 30);
+  ok(!H.held.length && game.state.selectedCreature === c.id, 'Esc while holding empties the hand and keeps the creature selected');
+  s.up(0); step(1 / 30);
+  s.keyDown('Escape'); s.keyUp('Escape'); step(1 / 30);
+  ok(game.state.selectedCreature === null, 'Esc with the hand empty clears the selection');
+  world.remove(c.id);
+  // a pedestal orb shaken out is cancelled: no cast, no fizzle, gone, its pedestal refills
+  const casts = [];
+  for (const type of ['miracle-cast', 'miracle-fizzle']) game.events.on(type, (e) => casts.push(type));
+  const orbId = game.systems.miracles.orbs.orbOn('rain');
+  const orb = orbId !== null && world.get(orbId);
+  if (ok(orb, 'a rain orb waits on its pedestal')) {
+    camera.centerOn(orb.x, orb.y, orb.z);
+    step(1 / 30);
+    moveTo(middle(orb)); s.down(0); step(0.2);
+    ok(H.heldId === orb.id, 'the hand holds the orb');
+    s.keyDown('Escape'); s.keyUp('Escape'); step(1 / 30);
+    s.up(0); step(1);
+    ok(!world.get(orb.id) && !casts.length && !H.held.length, `the shaken-out orb is gone uncast (${casts.join(',') || 'no cast or fizzle'})`);
+    step(5);
+    ok(game.systems.miracles.orbs.orbOn('rain') !== null && !casts.length, 'its pedestal has a new orb a few seconds later');
+  }
   for (const v of people) v.grabbable = true;
 });
 

@@ -9,8 +9,8 @@
 // edge or middle-drag pan belong to the camera.
 //
 // The hand in bulk (gameplay spec step 1):
-// - Drawing. Holding the left button on one of the player's fields draws its grain, on a storehouse
-//   its grain, on a woodpile its wood; on a tree, a press held still for treeDrawDelay draws the
+// - Drawing. Holding the left button (past drawDelay, so a click takes nothing) on one of the
+//   player's fields draws its grain, on a storehouse its grain, on a woodpile its wood; on a tree, a press held still for treeDrawDelay draws the
 //   tree's wood (a tree drained empty is gone), while a press that moves pulls the tree up as
 //   before. The amount grows faster the longer the button is held (HAND.draw) and rides in the hand
 //   as one wood or grain pile. While the button stays down the hand keeps drawing from every source
@@ -20,11 +20,12 @@
 // - Pouring. Holding a wood pile over a player site for pourDelay pours it in and god-builds the site
 //   (godBuild in src/village/sim.js: the whole job costs VILLAGE.godBuildFactor x the wood).
 // - Multi pick-up (HAND.multiPickup). Sweeping across villagers or trees with the button down after
-//   grabbing one of them adds every one of that kind the hand passes over. A group of two or more
-//   stays in the hand when the button is let go (a tree group let go slowly over a woodpile or
-//   blueprint goes in at once); then a click puts one out (thrown if the click flicks), and holding
+//   grabbing one of them adds every one of that kind the hand passes over, once the pointer has
+//   moved sweepStart from the press. A group of two or more let go slowly stays in the hand (a tree
+//   group let go slowly over a woodpile or blueprint goes in at once); let go fast, it is thrown; then a click puts one out (thrown if the click flicks), and holding
 //   the button puts them out one per pourInterval where the hand goes.
-// - Shaking the hand (shakeReversals fast direction changes) or Escape empties it: everything held
+// - Shaking the hand (shakeReversals fast direction changes) or Escape (unless a building is picked
+//   for placing) empties it: everything held
 //   drops where the hand is and an orb is cancelled (it vanishes uncast; its pedestal refills).
 //
 // Events (spec): grab / release { entityId, kind, miracle, x, y, z, vx, vy, vz }, landed { entityId,
@@ -126,13 +127,15 @@ export function create(game) {
     if (gesture) gesture.dragged = true;
     // a press on a tree that moves before it is held still pulls the tree up
     if (press?.mode === 'pending') {
-      const e = world.get(press.id);
+      const { id, sx, sy } = press;
+      const e = world.get(id);
       press = null;
-      if (e && canTouch(e)) { grab(e); press = { mode: 'grab', t: 0 }; }
+      if (e && canTouch(e)) { grab(e); press = { mode: 'grab', t: 0, sx, sy }; }
     }
   });
   events.on('key-down', ({ code }) => {
     if (code !== 'Escape') return;
+    if (game.systems?.ui?.build?.kind) return; // Esc puts a picked building away; the hand keeps what it holds
     if (hand.held.length) shake();
     else game.state.selectedCreature = null;
   });
@@ -143,20 +146,22 @@ export function create(game) {
       return;
     }
     const e = pickTouchable();
-    if (e?.kind === 'tree') { press = { mode: 'pending', id: e.id, t: 0 }; return; }
-    if (e && e.kind !== 'creature') { grab(e); press = { mode: 'grab', t: 0 }; return; }
+    if (e?.kind === 'tree') { press = { mode: 'pending', id: e.id, t: 0, sx: p.sx, sy: p.sy }; return; }
+    if (e && e.kind !== 'creature') { grab(e); press = { mode: 'grab', t: 0, sx: p.sx, sy: p.sy }; return; }
     if (!e) {
       const b = buildingUnder((o) => sim().handSource(o));
       const kind = b && sim().handSource(b);
-      if (kind) { press = { mode: 'draw', t: 0, kind, trees: false, stores: b.type !== 'field' }; return; }
+      // the press may still turn out to be a rub across the creature or a click: it keeps a gesture
+      if (kind) press = { mode: 'draw', t: 0, kind, trees: false, stores: b.type !== 'field' };
     }
     gesture = { pressedId: e ? e.id : null, creatureId: e ? e.id : null, dragged: false, stroked: false, lastSx: p.sx, lastSy: p.sy };
     tracker.reset();
   }
 
   function leftUp() {
-    const pr = press;
+    const pr = press, g = gesture;
     press = null;
+    gesture = null;
     if (pr?.mode === 'shaken' || pr?.mode === 'pending') return; // a click on a tree does nothing
     if (pr?.mode === 'put') {
       // one click puts one out: dropped, or thrown when the click flicks
@@ -166,13 +171,12 @@ export function create(game) {
     const list = heldList();
     if (list.length && !hand.stowed) {
       const v = releaseVelocity(p.vsx, p.vsy);
-      if (list.length === 1) releaseOne(list[0], v);
+      // release speed decides for a group too: a flick throws everything held
+      if (list.length === 1 || v.thrown) for (const e of list) releaseOne(e, v);
       else if (list[0].kind === 'tree' && !v.thrown && sinkUnder('tree')) for (const e of list) releaseOne(e, STILL);
       else hand.stowed = true;
       return;
     }
-    const g = gesture;
-    gesture = null;
     if (!g || g.dragged || g.stroked) return;
     // a click: on the creature selects it, anywhere else clears the selection
     game.state.selectedCreature = g.pressedId;
@@ -271,14 +275,18 @@ export function create(game) {
     hand.pouring = null;
     if (!press) return;
     press.t += dt;
-    if (press.mode === 'pending' && press.t >= HAND.treeDrawDelay) press = { mode: 'draw', t: 0, kind: 'wood', trees: true, stores: false };
+    if (press.mode === 'pending' && press.t >= HAND.treeDrawDelay) press = { mode: 'draw', t: 0, kind: 'wood', trees: true, stores: false, ready: true };
+    // a press on a field or store that reaches the creature before anything is drawn is a stroke
+    if (press.mode === 'draw' && gesture?.creatureId != null && !hand.held.length) { press = null; return; }
     if (press.mode === 'grab') sweep();
     if ((press.mode === 'grab' || press.mode === 'draw') && !pour(dt)) drawFrom(dt);
     if (press.mode === 'put') putOut(dt);
   }
 
-  /** Multi pick-up: adds one more thing of the held kind under the pointer. */
+  /** Multi pick-up: adds one more thing of the held kind under the pointer, once the pointer has
+   * moved sweepStart from the press (so a press on two overlapping villagers takes the front one). */
   function sweep() {
+    if (Math.hypot(p.sx - press.sx, p.sy - press.sy) < HAND.sweepStart) return;
     const list = heldList();
     if (!HAND.multiPickup || !list.length || list.length >= HAND.multiMax || !HAND.multiKinds.includes(list[0].kind)) return;
     const kind = list[0].kind;
@@ -288,6 +296,8 @@ export function create(game) {
 
   /** Draws resource into the hand's pile from the source under the pointer. */
   function drawFrom(dt) {
+    // drawing from a building starts after drawDelay, so a click on a field takes nothing
+    if (press.mode === 'draw' && !press.ready && press.t < HAND.drawDelay) return;
     const list = heldList();
     let pile = null, kind, trees = false, stores = false;
     if (press.mode === 'draw') {

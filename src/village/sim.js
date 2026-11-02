@@ -40,7 +40,7 @@ export const grounded = (e) => !e.held && !e.airborne && !e.sinking;
 /** Puts wood item `it` into blueprint `site`, no more than the site still needs (woodCost -
  * woodHave): the item keeps the rest and is removed from the world only once empty, so a big load
  * is never sunk into a nearly full site. A site with all its wood in moves on to 'building'. Returns
- * the logs put in. Shared by the village's builders (unload) and the creature's haul, so both
+ * the wood put in. Shared by the village's builders (unload) and the creature's haul, so both
  * deliver by the same rule (round 39: the creature added its whole load and lost the surplus). */
 export function putWood(world, site, it) {
   const amount = it.amount ?? 1;
@@ -361,7 +361,7 @@ export function createVillageSim(game) {
     const list = own(v.owner).filter((b) => isWreck(b) && !(b.burning > 0) && !bad(v, b.id) && (!salvage || salvageOf(b) > 0));
     return nearest(list, v.x, v.y);
   }
-  /** Logs left in a wreck: salvageShare (rounded down) of the timber built into it and of any wood stacked on it. */
+  /** Wood left in a wreck: salvageShare (rounded down) of the timber built into it and of any wood stacked on it. */
   const salvageOf = (b) => Math.floor(((b.woodHave ?? 0) + (b.wood ?? 0)) * T.salvageShare);
   function clearWreck(v, w) {
     v.target = w.id;
@@ -639,7 +639,7 @@ export function createVillageSim(game) {
   }
 
   /** Puts carried wood into blueprint `site`, no more than it still needs (the rest stays carried, so
-   * a big salvage load is never sunk into a small site). Returns the logs put in. */
+   * a big salvage load is never sunk into a small site). Returns the wood put in. */
   function unload(v, it, site) {
     const n = putWood(world, site, it);
     if (!live(it)) v.carry = null;
@@ -652,7 +652,7 @@ export function createVillageSim(game) {
     const depot = nearest(own(v.owner, depotType).filter((b) => usable(b) && !bad(v, b.id)), v.x, v.y);
     const vill = villages[v.owner];
     if (it.kind === 'wood') {
-      // Wood goes to the woodpile, where builders fetch it haulLoad logs at a time, so stock builds
+      // Wood goes to the woodpile, where builders fetch it haulLoad wood at a time, so stock builds
       // up between sites. With no usable woodpile it goes straight to the village's focus blueprint,
       // a woodpile blueprint first, so a lost woodpile comes back. (Sending it straight to sites even
       // with a woodpile standing kept the stock at 0 whenever any site was open.)
@@ -712,7 +712,7 @@ export function createVillageSim(game) {
           tree = null;
         }
         if (!tree || tree.kind !== 'tree' || !grounded(tree)) {
-          // A wreck of ours with timber left in it beats a tree: clearing it yields several logs of
+          // A wreck of ours with timber left in it beats a tree: clearing it yields a load of
           // salvage and frees the lost building's footprint for its rebuild.
           const wreck = chooseWreck(v, true);
           if (wreck) return clearWreck(v, wreck);
@@ -887,13 +887,15 @@ export function createVillageSim(game) {
     // (builders then only work sites whose wood is in and clear wrecks, which yields salvage wood).
     // Then the usual shares: worship, building, farming, and woodcutting takes everyone left.
     const tiers = [];
-    if (grain === 0 && farmers) tiers.push(['farmer', Math.min(farmers, Math.max(1, Math.round(n * T.foodShare)))]);
+    // Starving: less grain in store than one meal (the rest cannot be eaten).
+    const starving = grain < T.mealGrain;
+    if (starving && farmers) tiers.push(['farmer', Math.min(farmers, Math.max(1, Math.round(n * T.foodShare)))]);
     if (wood === 0 && waiting) {
       tiers.push(['woodcutter', Math.max(1, Math.round(n * T.gatherShare))]);
       tiers.push(['builder', Math.min(builders, (open.length - waiting) * 2 + (wrecks ? 1 : 0))]);
     }
-    // A starving village (no grain in store) sends no one to pray.
-    tiers.push(['worshipper', usable(vill.temple) && grain > 0 ? Math.round(n * share) : 0], ['builder', builders], ['farmer', farmers],
+    // A starving village sends no one to pray.
+    tiers.push(['worshipper', usable(vill.temple) && !starving ? Math.round(n * share) : 0], ['builder', builders], ['farmer', farmers],
       ['woodcutter', !woodRoom ? 0 : wood < T.woodTarget ? n : 1]);
     const want = { worshipper: 0, builder: 0, farmer: 0, woodcutter: 0 };
     const order = [];
@@ -932,10 +934,12 @@ export function createVillageSim(game) {
     }
   }
 
+  /** Takes n grain out of the village's usable storehouses, fullest first, when together they hold
+   * that much (the hand drops piles of any size, so a meal may be split over two stores). */
   function takeGrain(owner, n) {
-    const st = own(owner, 'storehouse').filter(usable).sort((a, b) => b.grain - a.grain || a.id - b.id)[0];
-    if (!st || st.grain < n) return false;
-    st.grain -= n;
+    const list = own(owner, 'storehouse').filter(usable).sort((a, b) => b.grain - a.grain || a.id - b.id);
+    if (list.reduce((s, b) => s + b.grain, 0) < n) return false;
+    for (const st of list) { const k = Math.min(st.grain, n); st.grain -= k; n -= k; if (n <= 0) break; }
     return true;
   }
   const grainOf = (owner) => own(owner, 'storehouse').reduce((s, b) => s + (b.stage === 'done' && b.hp > 0 ? b.grain : 0), 0);
@@ -1190,27 +1194,27 @@ export function createVillageSim(game) {
 
   /** Puts pile or tree e (dropped by the hand) into building b: all of it into a store, no more than
    * the site still needs into a site. A pile keeps what is left over; a tree is used up, and wood a
-   * site could not take is left as a pile beside it. Returns the units put in (0 when b takes none). */
+   * site could not take is left as a pile on the site. Returns the units put in (0 when b takes none). */
   function handPut(b, e) {
     const how = handSink(b, e?.kind);
     if (!how || !live(e)) return 0;
-    const vill = villages[b.owner];
     const tree = e.kind === 'tree';
     const amount = tree ? woodIn(e) : e.amount ?? 1;
+    // The village's wood stats (woodDelivered, woodSpent) count villagers' hauling only: the hand
+    // can move the same wood in and out of a store any number of times.
     let put = amount;
     if (how === 'store') {
       if (e.kind === 'grain') b.grain += amount;
-      else { b.wood += amount; vill.woodDelivered += amount; }
+      else b.wood += amount;
     } else {
       put = Math.min(amount, b.woodCost - b.woodHave);
       b.woodHave += put;
-      vill.woodDelivered += put; vill.woodSpent += put;
       if (b.woodHave >= b.woodCost && b.stage === 'blueprint') b.stage = 'building';
     }
     const left = amount - put;
     if (tree) {
       removeTree(world, e);
-      if (left > 0) world.spawn('wood', { x: e.x, y: e.y, z: world.heightAt(e.x, e.y), vx: 0, vy: 0, vz: 0, amount: left, grabbable: true, carriedBy: null, madeBy: 'village' });
+      if (left > 0) world.spawn('wood', { x: b.x, y: b.y, z: world.heightAt(b.x, b.y), vx: 0, vy: 0, vz: 0, amount: left, grabbable: true, carriedBy: null, madeBy: 'village' });
     } else if (left > 0) e.amount = left;
     else world.remove(e.id);
     return put;

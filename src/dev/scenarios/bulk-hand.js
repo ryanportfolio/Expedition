@@ -114,16 +114,16 @@ export default async function bulkHand(t, game) {
   s.down(0);
   tick();
   for (const v of group.slice(1)) glide(middle(v), 0.15);
-  t.assert(H.held.length === 3, `sweeping across villagers holds all three (${H.held.length})`);
+  t.assert(H.held.length === 3 && group.every((v) => v.held), `sweeping across villagers holds all three (${H.held.length})`);
   glide(at(cx + 1, cy + 3), 0.3);
   t.step(0.2);
   s.up(0);
   tick();
-  t.assert(H.stowed && H.held.length === 3, 'let go, the group stays in the hand');
+  t.assert(H.stowed && H.held.length === 3 && group.every((v) => v.held), 'let go slowly, the group stays in the hand');
   await t.shot('multi');
   s.down(0); s.up(0);
   tick();
-  t.assert(H.held.length === 2, `a click puts one villager out (${H.held.length} left)`);
+  t.assert(H.held.length === 2 && group.filter((v) => !v.held).length === 1, `a click puts one villager out (${H.held.length} left)`);
   s.down(0);
   for (let i = 0; i < 40 && H.held.length; i++) {
     s.move(p.sx + 2, p.sy);
