@@ -48,7 +48,7 @@ The research notes, the full URL list (about 150 pages and 14 videos) and the vi
 ### Winning a land
 
 - **Core.** Two routes, mixed freely. Impress: when the player's town is more impressive than a rival town's capture threshold, its villagers leave and walk to the player's town. Conquer: a platoon carried to the rival's town centre captures it over time. [GUIDE, WIKI, REV]
-- **Core.** The two routes end differently. A town won by impressing is left empty and neutral; a town taken by force stays a separate town with its people and stock, which the player then runs or moves to the capital by hand. Migration alone cannot take a rival's capital; that needs force or an epic charm (see 8). [GUIDE, MAN]
+- **Core.** The two routes end differently. A town won by impressing is left empty and neutral; a town taken by force stays a separate town with its people and stock, which the player then runs or moves to the capital by hand. Capitals can be won either way, but impressing one takes a much higher score: one capital needed 19,839 against 4,466 to 8,433 for villages, and the guide calls the last land's capital very hard to impress and easy to take by force. The manual adds that taking all of a town's people as migrants never captures its town centre itself; only force does. [GUIDE, MAN, WIKI]
 - **Important.** When every town on the land is held, the influence limit disappears and the hand works anywhere. A gold scroll then appears and moves the player to the next land on a click and a confirm. Land wins pay 100,000 to 120,000 tribute. [GUIDE, WIKI, VID]
 - **Important.** The rival also attacks: small waves of about 20 soldiers early, catapults later, and epic miracles cast at the player's town from the sixth land on. [GSG, WIKI, VID]
 
@@ -263,7 +263,7 @@ Costs are tribute / wood / ore where known. "Free" means no tribute.
 ### Epic miracles
 
 - **Important.** A charged wonder works as a button: press it to take the epic, press the target. Epics land anywhere except inside a rival's influence or over water. [MAN]
-- **Important.** Effects: the charm floats enemy villagers and soldiers into the air, makes them glow and turns them into the player's civilians, who walk home (it can more than double a town, and it can take a capital that migration cannot); the earthquake opens a long fissure that swallows buildings and walls; the whirlwind lifts people and buildings and drops them, but does nothing to walls; the volcano raises a mountain, rains fire and pours lava that kills everything but creatures. Water hardens lava, the shield blocks the falling fire. Players found the charm the most memorable moment of the campaign. [GUIDE, WIKI, VID]
+- **Important.** Effects: the charm floats enemy villagers and soldiers into the air, makes them glow and turns them into the player's civilians, who walk home (it can more than double a town, and it empties a town far faster than migration); the earthquake opens a long fissure that swallows buildings and walls; the whirlwind lifts people and buildings and drops them, but does nothing to walls; the volcano raises a mountain, rains fire and pours lava that kills everything but creatures. Water hardens lava, the shield blocks the falling fire. Players found the charm the most memorable moment of the campaign. [GUIDE, WIKI, VID]
 - **Important.** The rival casts epics at the player, with an audible countdown. [VID, WIKI]
 
 ---
@@ -394,6 +394,7 @@ Expedition aims at this scale ([decision 4](#decisions)): towns of hundreds of v
 13. **Tribute on the evil path.** One review: none for some evil completions. Guide: some objectives reward evil.
 14. **Land count.** Nine lands (wikis, a walkthrough) or eight (one review, probably counting differently).
 15. **Desire symbols.** Wiki pages on desire flags describe the first game; the second game shows wants as statues at the town centre.
+16. **Capitals and migration.** The manual: emptying a town by migration never captures its town centre, only force does. The guide: a very impressive town makes even a rival capital join peacefully. Read together, impressing a capital wins it for the land, but the building is not taken.
 
 ---
 
@@ -548,7 +549,7 @@ The user settled these on 2026-11-02. Later steps follow them.
 
 1. **Jobs.** Villagers keep Expedition's automatic job assignment by default. The player can also assign a job by hand by dropping a villager on its place, and a job set by hand stays until the player clears it; automatic assignment never moves that villager.
 2. **Camera rotation.** Planned, built near the end (step 16). Until then the view stays fixed, and new sprites need not be drawn from four sides yet.
-3. **The belief meter.** Replaced by migration (step 9). Impressing a rival town pulls its villagers over; the force route takes its town centre; the conversion epic takes what neither can. Expedition's fear side of the meter has no counterpart in the reference and goes with it.
+3. **The belief meter.** Replaced by migration (step 9). Impressing a rival town pulls its villagers over; the force route takes its town centre; the conversion epic pulls a whole crowd over at once. Expedition's fear side of the meter has no counterpart in the reference and goes with it.
 4. **Scale.** Close to the reference with no fixed cap: towns of hundreds of villagers, up to the 800 to 1,200 the largest reference towns reached, and costs and tribute in the reference's ranges. This needs a much larger map than 64 x 64 and a sim and renderer that hold hundreds of villagers inside the frame budget (step 2).
 5. **Lands.** One larger island for now. The reference itself is a chain of nine separate islands (see 1), so a chain stays possible later (step 17); for now one island carries several rival towns.
 6. **Source list.** The URL list and research notes stay out of the repository, so `check:ip` keeps its rule with no exception. A copy is kept on the author's machine at `D:\CoreWise\_artifacts\Expedition\gameplay-research\` (`sources-index.md` maps the keys above to URLs; `research-*.md` holds the per-claim notes; `transcripts\` the 14 video transcripts).
@@ -573,6 +574,6 @@ Each step leaves a game that plays better than before and gives the next step so
 12. **Creature roles.** Role leashes tied to a building or spot with a drawn area, a free-will bar, a learning menu, the pen, creature miracles and growth. *Large.*
 13. **Miracles complete.** Throw and pour as different effects; shield and meteor; repeat key. *Medium.*
 14. **Armies and the force route.** Armoury flags, swordsmen and archers, flag orders, capture; walls and gates; rival platoons that attack; catapults; creature fights. *Large.*
-15. **Wonders and epics.** The conversion epic first (it takes what migration cannot), then the destructive three; the rival casting epics back. *Large.*
+15. **Wonders and epics.** The conversion epic first (it serves the impress route), then the destructive three; the rival casting epics back. *Large.*
 16. **Camera rotation.** Four 90-degree turns, with every sprite and the terrain drawn from four sides. *Large.*
 17. **Optional depth.** Ages and mourning, day and night with a sundial, refineries, hand forcing and gestures, toys, ranks and merging, music, and a chain of islands if one island ever feels too small.
