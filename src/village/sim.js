@@ -1011,9 +1011,11 @@ export function createVillageSim(game) {
 
   // ---- hand drop -------------------------------------------------------------------------------
 
-  /** A villager dropped near a temple, site, field, mine, house, tree or another adult of its village
-   * takes that job for good (worshipper, builder, farmer, miner, breeder, forester, breeder again). Only a
-   * slow drop from the hand calls this: a throw, a shake or the creature's drop leaves the job as it is. */
+  /** A villager dropped near a temple, site, field, mine, house or tree takes that job (worshipper,
+   * builder, farmer, miner, breeder, forester); with none of those in reach, next to another adult of
+   * its village standing on the ground, breeder. For the player's villagers the job is set by hand and
+   * stays; a rival villager takes it under the rival's automatic assignment, which may move it again.
+   * Only a slow drop from the hand calls this: a throw, a shake or the creature's drop leaves the job. */
   function dropAssign(v, x, y) {
     if (!v || v.kind !== 'villager' || v.dying || v.job === undefined) return;
     const R = T.dropRadius;
@@ -1027,12 +1029,13 @@ export function createVillageSim(game) {
       else if (b.type === 'mine' && b.ore >= 1) consider(rectDist(b, x, y), 'miner', b.id);
       else if (b.type === 'house' && b.stage === 'done') consider(rectDist(b, x, y), 'breeder', b.id);
     }
-    // Trees and villagers stand everywhere, so one wins only when it is a tile closer than any
-    // building target.
+    // Trees stand everywhere, so a tree wins only when it is a tile closer than any building target.
     for (const t of world.query({ kind: 'tree', x, y, r: R })) if (!t.held) consider(Math.min(R, Math.hypot(t.x - x, t.y - y) + 1), 'forester', t.id);
-    for (const o of world.query({ kind: 'villager', x, y, r: R }))
-      if (o !== v && o.owner === v.owner && o.job !== undefined && !o.dying && !o.held) consider(Math.min(R, Math.hypot(o.x - x, o.y - y) + 1), 'breeder', null);
-    if (best) setJob(v, best.job, best.target, true);
+    // Villagers stand by every workplace, and a group put out of the hand lands side by side, so an
+    // adult counts only where no workplace is in reach, and only one standing on the ground.
+    if (!best) for (const o of world.query({ kind: 'villager', x, y, r: R }))
+      if (o !== v && o.owner === v.owner && o.job !== undefined && !o.dying && !o.held && !o.airborne && !air.has(o.id)) consider(Math.hypot(o.x - x, o.y - y), 'breeder', null);
+    if (best) setJob(v, best.job, best.target, v.owner === 'player');
   }
 
   /** True when the place of v's hand-set job is gone, so v goes back to automatic assignment: the
@@ -1229,7 +1232,7 @@ export function createVillageSim(game) {
         events.emit('villager-died', { id: v.id, cause: deathCause(v) });
         continue;
       }
-      if (pop[v.owner] !== undefined) { pop[v.owner]++; if (v.job === 'breeder') breeders[v.owner]++; }
+      if (pop[v.owner] !== undefined) { pop[v.owner]++; if (v.job === 'breeder' && !v.held) breeders[v.owner]++; } // a breeder in the hand is not at home
       v.hunger = Math.min(1, v.hunger + dt / T.eatInterval);
       if (v.hunger >= 1 && takeGrain(v.owner, T.mealGrain)) v.hunger = 0;
       if (v.held || air.has(v.id)) {

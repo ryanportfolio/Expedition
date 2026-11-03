@@ -198,7 +198,7 @@ export default async function villageArt(t, game) {
   // job is given it by hand; all six then stand in a row on open ground beside the village, held still,
   // and every glow pixel drawn must be the job's colour in both frames.
   const home = world.query({ kind: 'building' }).find((b) => b.type === 'house' && b.owner === 'player' && b.stage === 'done');
-  const crowd = world.query({ kind: 'villager' }).filter((v) => v.owner === 'player' && !v.dying);
+  const crowd = world.query({ kind: 'villager' }).filter((v) => v.owner === 'player' && !v.dying && !v.carry); // a carried load would hide glow pixels
   const breeder = crowd[0];
   world.move(breeder, home.x, home.y, world.heightAt(home.x, home.y));
   game.events.emit('release', { entityId: breeder.id, kind: 'villager', x: home.x, y: home.y, z: breeder.z, vx: 0, vy: 0, vz: 0, thrown: false, shaken: false });
@@ -244,7 +244,7 @@ export default async function villageArt(t, game) {
   t.log('hand-set glow', { good, evil });
   for (const job of Object.keys(JOB_GLOW)) {
     const g = good[job], e = evil[job];
-    t.assert(g && g.n >= 10 && g.right >= 0.6 * g.n && e.right >= 0.6 * e.n && g.color === e.color,
+    t.assert(g && g.n >= 10 && g.right >= 0.9 * g.n && e.right >= 0.9 * e.n && g.color === e.color,
       `${job} by hand glows in its colour, the same good and evil (${g ? `${g.right}/${g.n} good, ${e.right}/${e.n} evil` : 'no villager'})`);
   }
 

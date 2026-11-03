@@ -37,5 +37,23 @@ flowchart LR
 - Creature brain: `src/creature/brain.js`
 - Dev hooks (`window.__game`): `src/dev/hooks.js`
 
+## Villager jobs (`src/village/sim.js`)
+- `assign()` deals jobs in tiers every `assignInterval`; a villager with `byHand` keeps its job and fills that tier's slot.
+- Hand drops: `release` / `landed` events → `dropAssign()`; `thrown`, `shaken` or `by: 'creature'` puts the id in `keepJob` (no job set). Only player villagers get `byHand`.
+- `placeGone()` clears `byHand` when the job's place is gone; glow (`JOB_GLOW`, `src/art/painters/villagers.js`) follows `byHand` in the village draw key.
+
+```mermaid
+stateDiagram-v2
+  auto: automatic (byHand false)
+  hand: set by hand (byHand true, glows)
+  auto --> hand: slow drop by a workplace (player villager)
+  hand --> hand: slow drop by another workplace
+  hand --> auto: shake
+  hand --> auto: place gone (placeGone)
+  hand --> [*]: death
+  auto --> auto: throw or creature drop
+  hand --> hand: throw or creature drop
+```
+
 ## Checks
 `commands.md`; doc section "Checks".

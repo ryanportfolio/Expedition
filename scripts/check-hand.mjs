@@ -957,13 +957,15 @@ section('jobs by hand: drop sets, throw keeps, shake clears', () => {
   camera.centerOn(field.x, field.y, world.heightAt(field.x, field.y));
   const fig = getSprite('test-figure');
   const v = world.query({ kind: 'villager' }).find((u) => u.owner === 'player' && u.job !== 'farmer');
-  const hold = () => { v.sprite = fig; v.path = null; v.wait = 60; moveTo(middle(v)); s.down(0); step(0.3); };
+  const hold = () => { v.sprite = fig; v.path = null; v.wait = 60; moveTo(middle(v)); s.down(0); step(0.3); ok(hs.state.held.includes(v.id), `the hand holds villager ${v.id} (${hs.state.held})`); };
+  const lastRelease = () => f.log.filter((e) => e.type === 'release' && e.entityId === v.id).at(-1);
   const overField = () => { const p = camera.worldToView(field.x, field.y, world.heightAt(field.x, field.y)); moveTo({ sx: p.sx, sy: p.sy }); step(0.4); };
   // a slow drop over the field
   hold(); overField(); s.up(0); step(2);
   ok(v.job === 'farmer' && v.byHand, `a villager dropped slowly on a field is a farmer by hand (${v.job}, by hand ${v.byHand})`);
   // a throw keeps the job set by hand, wherever the villager lands
   hold(); flick(1, 0.3, 6); step(3);
+  ok(lastRelease()?.thrown === true, `the hand reports the flick as a throw (thrown ${lastRelease()?.thrown})`);
   ok(v.hp > 0 && v.job === 'farmer' && v.byHand, `a throw keeps the hand-set job (${v.job}, by hand ${v.byHand}, hp ${v.hp})`);
   // a shake over the field clears it, and the landing by the field does not set it again
   hold(); overField(); hs.shake(); step(2);

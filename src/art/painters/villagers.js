@@ -27,7 +27,7 @@ const JOBS = ['farmer', 'forester', 'miner', 'builder', 'worshipper', 'breeder',
 
 /** Outline colour [ramp, shade] of a villager whose job the hand set, by job. */
 export const JOB_GLOW = Object.freeze({
-  farmer: ['fire', 5], forester: ['heal', 4], miner: ['ink', 6], builder: ['clay', 5], worshipper: ['lightning', 5], breeder: ['rose', 5],
+  farmer: ['fire', 5], forester: ['heal', 4], miner: ['lightning', 3], builder: ['fire', 3], worshipper: ['lightning', 5], breeder: ['rose', 5],
 });
 const POSES = ['idle', 'walk', 'work', 'carry', 'pray', 'flee', 'dead'];
 const FACINGS = ['se', 'sw', 'ne', 'nw'];

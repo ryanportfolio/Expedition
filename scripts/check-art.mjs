@@ -325,6 +325,21 @@ check('neutral ramps identical across all 17 alignments', neutralSame);
       check(`${job} glow colour is its own`, !seen.has(good[gi]));
       seen.add(good[gi]);
     }
+    // Far enough apart to tell at a glance: every two glow colours at least 0.1 apart in OKLab.
+    const lab = (hex) => {
+      const [r, g, b] = hexRGB(hex).map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+      const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+      const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+      const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+      return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+    };
+    const glows = Object.entries(JOB_GLOW).map(([job, [ramp, shade]]) => [job, lab(RAMPS[RAMP[ramp]].good[shade])]);
+    let close = null;
+    for (let i = 0; i < glows.length; i++) for (let j = i + 1; j < glows.length; j++) {
+      const d = Math.hypot(...glows[i][1].map((v, k) => v - glows[j][1][k]));
+      if (!close || d < close.d) close = { d, pair: `${glows[i][0]}/${glows[j][0]}` };
+    }
+    check('job glow colours at least 0.1 apart (OKLab)', close.d >= 0.1, `closest ${close.pair} ${close.d.toFixed(3)}`);
   }
   const fig = registry.getSprite('test-figure');
   check('test figure is about 10 px tall', fig.h >= 9 && fig.h <= 12, `h ${fig.h}`);

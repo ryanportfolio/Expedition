@@ -1627,6 +1627,35 @@ function forestRun(seed) {
     world.move(guest, spot.x + 0.6, spot.y, world.heightAt(spot.x + 0.6, spot.y));
     game.events.emit('release', { entityId: guest.id, kind: 'villager', x: guest.x, y: guest.y, z: guest.z, vx: 0, vy: 0, vz: 0, thrown: false, shaken: false });
     check(guest.job === 'breeder' && guest.byHand, `dropped next to another adult: a breeder (${guest.job})`);
+    // An adult still in the air (a group put out of the hand lands side by side) does not count.
+    const third = all.find((v) => v !== host && v !== guest && !v.byHand);
+    host.airborne = true;
+    const before = third.job;
+    world.move(third, spot.x - 0.6, spot.y, world.heightAt(spot.x - 0.6, spot.y));
+    game.events.emit('release', { entityId: third.id, kind: 'villager', x: third.x, y: third.y, z: third.z, vx: 0, vy: 0, vz: 0, thrown: false, shaken: false });
+    host.airborne = false;
+    check(third.job === before && !third.byHand, `dropped next to an adult still in the air: no breeder (${before} -> ${third.job})`);
+  }
+  // A workplace in reach beats an adult standing closer: dropped 1.3 tiles off a field beside
+  // another villager, a farmer.
+  {
+    const field = buildings(game, 'player', 'field').find((b) => b.hp > 0);
+    const [x, y] = [field.tx + field.fw + 1.3, field.ty + 1.5];
+    const [stand, drop] = all.filter((v) => !v.byHand && !v.dying).slice(-2);
+    world.move(stand, x, y + 0.05, world.heightAt(x, y + 0.05));
+    world.move(drop, x, y, world.heightAt(x, y));
+    game.events.emit('release', { entityId: drop.id, kind: 'villager', x, y, z: drop.z, vx: 0, vy: 0, vz: 0, thrown: false, shaken: false });
+    check(drop.job === 'farmer', `dropped by a field next to another adult: a farmer (${drop.job})`);
+  }
+  // A rival villager dropped by its temple takes the job, but under the rival's own automatic
+  // assignment: the player's hand never freezes the rival's jobs.
+  {
+    const rt = buildings(game, 'rival', 'temple')[0];
+    const rv = villagers(game, 'rival').find((v) => !v.dying && v.job !== 'worshipper');
+    const [x, y] = [rt.tx + rt.fw + 0.5, rt.ty + 1.5];
+    world.move(rv, x, y, world.heightAt(x, y));
+    game.events.emit('release', { entityId: rv.id, kind: 'villager', x, y, z: rv.z, vx: 0, vy: 0, vz: 0, thrown: false, shaken: false });
+    check(rv.job === 'worshipper' && !rv.byHand, `a rival villager dropped by its temple prays, not set by hand (${rv.job}, by hand ${rv.byHand})`);
   }
   // With no house left standing, breeders go back to automatic assignment.
   for (const h of buildings(game, 'player', 'house')) h.hp = 0;
