@@ -175,7 +175,10 @@ export function createInput(events) {
     const p = input.pointer;
     const t = input.now();
     samples.push({ t, sx: p.sx, sy: p.sy, x: p.x, y: p.y });
-    while (samples.length > 1 && t - samples[0].t > VELOCITY_WINDOW_MS) samples.shift();
+    // drop samples older than the window, and any stamped later than now: a clock that jumped back
+    // (input.now switched from real time to sim time, as scenarios do) left them, and mixing the two
+    // clocks gave a release velocity of hundreds of px/s for a slow drag
+    while (samples.length > 1 && (t - samples[0].t > VELOCITY_WINDOW_MS || samples[0].t > t)) samples.shift();
     const a = samples[0], b = samples[samples.length - 1];
     const dt = (b.t - a.t) / 1000;
     if (dt > 0) {
