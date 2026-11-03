@@ -1,5 +1,5 @@
 // Item painters: the loose goods villagers haul. `wood` is a short bundle of split logs tied with
-// cord, `grain` a tied burlap sack. Both sit on their ground contact row (anchor at the bottom
+// cord, `grain` a tied burlap sack, `ore` a heap of rust-red ore lumps. Both sit on their ground contact row (anchor at the bottom
 // center), so the same sprite works lying on the ground and riding on a carrier's head: the
 // village system moves a carried item to the carrier's position 1.2 height units up.
 
@@ -57,5 +57,21 @@ function grain() {
   return outline(fromMap(map, key, 2), idx('sand', 0));
 }
 
-export const sprites = { wood, grain };
-export const previews = { wood: [], grain: [] };
+/** Heap of ore lumps: grey stone streaked rust-red, lit from the top-left. 8 x 6 with outline. */
+function ore() {
+  // r stone light to dark (1-3), o ore bright to dark (4-6), g a glint.
+  const map = [
+    '..g4..',
+    '.1455.',
+    '14523r',
+    '452356',
+  ];
+  const key = {
+    g: idx('clay', 7), 1: idx('rock', 5), 2: idx('rock', 4), 3: idx('rock', 3), r: idx('rock', 2),
+    4: idx('clay', 6), 5: idx('clay', 4), 6: idx('clay', 2),
+  };
+  return outline(fromMap(map, key, 3), idx('rock', 0));
+}
+
+export const sprites = { wood, grain, ore };
+export const previews = { wood: [], grain: [], ore: [] };

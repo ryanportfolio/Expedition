@@ -21,6 +21,8 @@ import { buildTerrainCache, createTerrainChunks, CHUNK, PART, surfaceHeights, WA
 import { drawTerrain } from '../src/terrain/pass.js';
 import { spriteInView } from '../src/render/renderer.js';
 import * as terrainSystem from '../src/systems/terrain.js';
+import { isOreRock } from '../src/systems/terrain.js';
+import { VILLAGE } from '../src/village/config.js';
 import * as painters from '../src/art/painters/terrain.js';
 import { registerPainters, getSprite, placeholderSprite } from '../src/art/registry.js';
 import { makeLut } from '../src/art/lut.js';
@@ -227,7 +229,14 @@ function faceCounts(world, cache) {
   const rocks = () => world.query({ kind: 'rock' });
   ok(rocks().length === world.rocks.length && world.rocks.length >= 20, `one rock entity per map rock (${rocks().length} of ${world.rocks.length})`);
   const r0 = rocks()[0];
-  ok(r0.grabbable === true && r0.hp === 1 && [1, 2, 3].includes(r0.size) && r0.sprite === getSprite('rock', { size: r0.size }), 'rock entity fields: size, grabbable, hp, sprite');
+  ok(r0.grabbable === true && r0.hp === 1 && [1, 2, 3].includes(r0.size) && r0.sprite === getSprite('rock', { size: r0.size, ore: r0.ore }), 'rock entity fields: size, grabbable, hp, sprite');
+  // Ore rocks (step 3): a position hash marks about VILLAGE.oreRockShare of them, with their own sprite.
+  const ores = rocks().filter((r) => r.ore === true);
+  const share = ores.length / rocks().length;
+  ok(rocks().every((r) => r.ore === isOreRock(r.x, r.y)), 'every rock is an ore rock exactly when isOreRock says so');
+  ok(Math.abs(share - VILLAGE.oreRockShare) < 0.08, `ore rocks: ${ores.length} of ${rocks().length} (${share.toFixed(2)}, want about ${VILLAGE.oreRockShare})`);
+  const plainSprite = getSprite('rock', { size: 2 }), oreSprite = getSprite('rock', { size: 2, ore: true });
+  ok(oreSprite !== plainSprite && oreSprite.data.some((v, i) => v !== plainSprite.data[i]), 'an ore rock is drawn differently from a plain one');
   ok(rocks().every((r) => Math.abs(r.z - world.heightAt(r.x, r.y)) < 1e-9), 'rocks sit on the terrain');
   terrainSystem.create(game);
   terrainSystem.create(game);
@@ -296,7 +305,7 @@ function faceCounts(world, cache) {
   const drawn = renderer.list.items.filter((it) => it.kind === 'rock').length;
   ok(inView > 0 && drawn === inView, `that first frame after the reload already draws them (${drawn} rocks in the draw list, ${inView} in view)`);
   const r = world.query({ kind: 'rock' })[0];
-  ok(r.grabbable === true && r.hp === 1 && r.sprite === getSprite('rock', { size: r.size }) && Math.abs(r.z - world.heightAt(r.x, r.y)) < 1e-9, 'respawned rocks have the create-time fields and sit on the terrain');
+  ok(r.grabbable === true && r.hp === 1 && r.ore === isOreRock(r.x, r.y) && r.sprite === getSprite('rock', { size: r.size, ore: r.ore }) && Math.abs(r.z - world.heightAt(r.x, r.y)) < 1e-9, 'respawned rocks have the create-time fields and sit on the terrain');
   game.tick(1 / 30);
   ok(rocks() === N, `a tick after that keeps ${rocks()}`);
   // Rocks thrown away or destroyed on the same map are not respawned.

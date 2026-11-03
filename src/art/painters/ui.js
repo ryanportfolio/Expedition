@@ -8,7 +8,7 @@
 //   ui-mark { kind }     7 x 7 feedback flourish on the thought bubble: 'glow' after a stroke,
 //                        'jag' after a slap
 //   ui-bubble { slots }  thought bubble for 1 or 2 icons, anchored at the tip of its trailing dots
-//   ui-build { kind }    13 x 11 build bar picture for house, field, storehouse, woodpile
+//   ui-build { kind }    13 x 11 build bar picture for house, field, store
 //   (ui-icon also has 'wood', a 7 x 7 log end for wood costs and stock)
 //
 // Icons are anchored at their top-left pixel (HUD code places them by corner). Light from the
@@ -433,34 +433,20 @@ const BUILD_ICONS = {
     'kdddddddddddk',
     'kkkkkkkkkkkkk',
   ], { G: ['grain', 6], g: ['grain', 4], D: ['dirt', 5], d: ['dirt', 3], e: ['dirt', 1] }],
-  // a low plank-roofed store on a stone footing, wide double doors
-  storehouse: [[
-    '.............',
+  // the store: a plank barn with open doors, an ore heap on its left, split logs on its right
+  store: [[
+    '....kkkkk....',
+    '...kRRRrrk...',
+    '..kRRRRrrqk..',
     '..kkkkkkkkk..',
-    '.kRRRRRrrrrk.',
-    'kRRRRRrrrrrqk',
+    '...kWbBbwk...',
+    '...kWbkbwk...',
+    '...kwbkbwkkk.',
+    '.kkkwbkbwkOOk',
+    'kEeEkbkbkOoOk',
+    'keEeSbkbskOOk',
     'kkkkkkkkkkkkk',
-    '.kWwkbBbkWwk.',
-    '.kWwkbkbkwwk.',
-    '.kwwkbkbkwwk.',
-    '.kSskbkbkSsk.',
-    '.kSskbkbkssk.',
-    '.kkkkkkkkkkk.',
-  ], { R: ['bark', 5], r: ['bark', 4], q: ['bark', 2], W: ['plaster', 6], w: ['plaster', 4], b: ['bark', 2], B: ['bark', 4], S: ['stone', 5], s: ['stone', 3] }],
-  // split logs stacked three, two, one, cut ends facing out
-  woodpile: [[
-    '.............',
-    '.....kkk.....',
-    '....kOOOk....',
-    '...kkOoOkk...',
-    '..kOOOkOOOk..',
-    '..kOoOkOoOk..',
-    '.kkkOkkkOkkk.',
-    'kOOOkOOOkOOOk',
-    'kOoOkOoOkOoOk',
-    'kbOOkbOOkbOOk',
-    '.kkk.kkk.kkk.',
-  ], { O: ['bark', 6], o: ['bark', 3], b: ['bark', 4] }],
+  ], { R: ['bark', 5], r: ['bark', 4], q: ['bark', 2], W: ['plaster', 6], w: ['plaster', 4], b: ['bark', 2], B: ['bark', 4], S: ['stone', 5], s: ['stone', 3], O: ['bark', 6], o: ['bark', 3], E: ['clay', 5], e: ['rock', 4] }],
 };
 const MIRACLES = new Set(['rain', 'heal', 'fire', 'lightning']);
 

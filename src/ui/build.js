@@ -11,9 +11,9 @@ import { KINDS } from '../village/config.js';
 import { BUILD } from './layout.js';
 import { col, fill, panel, drawText, measure, icon } from './draw.js';
 
-/** Bar order; keys 1-4 pick them in this order. */
-export const BUILD_KINDS = Object.freeze(['house', 'field', 'storehouse', 'woodpile']);
-export const BUILD_KEYS = Object.freeze({ Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Numpad1: 0, Numpad2: 1, Numpad3: 2, Numpad4: 3 });
+/** Bar order; keys 1-3 pick them in this order. */
+export const BUILD_KINDS = Object.freeze(['house', 'field', 'store']);
+export const BUILD_KEYS = Object.freeze({ Digit1: 0, Digit2: 1, Digit3: 2, Numpad1: 0, Numpad2: 1, Numpad3: 2 });
 
 /** Wood cost of a kind, read from the village's building definitions. */
 export const costOf = (kind) => KINDS[kind]?.cost ?? 0;

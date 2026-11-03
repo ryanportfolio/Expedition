@@ -1,5 +1,6 @@
-// Building painters: `house`, `field`, `storehouse`, `woodpile`, `temple`, each with
-// { owner: 'player'|'rival', stage: 'blueprint'|'building'|'done'|'wrecked', growth }.
+// Building painters: `house`, `field`, `store`, `mine`, `temple`, each with
+// { owner: 'player'|'rival', stage: 'blueprint'|'building'|'done'|'wrecked', growth, empty }
+// (growth for fields, empty for a worked-out mine).
 //
 // Every building is modelled as flat faces in world space (x, y in tiles from the footprint
 // center, z in pixels up) and rasterized with the shared iso projection, so walls, roofs and
@@ -429,42 +430,72 @@ function arch(g, axis, at, c, w, z0, h) {
   else face(g, [at + 0.001, c + w / 2, z0], [0, -w, 0], [0, 0, h], paint);
 }
 
-function playerStorehouse() {
-  const x0 = -0.6, x1 = 0.6, y0 = -0.68, y1 = 0.68, zw = 13;
+/** Heap of ore lumps on the ground round world (x, y): grey stone streaked rust-red, back to front. */
+function oreHeap(g, x, y, stone = 'rock') {
+  const { s } = g;
+  const lumps = [[-0.12, -0.12, 4], [0.1, -0.1, 4], [-0.18, 0.08, 2], [0.02, 0.02, 7], [0.16, 0.1, 2], [-0.05, 0.18, 1], [0.12, 0.22, 0]];
+  lumps.forEach(([dx, dy, z], k) => {
+    const [cx, cy] = P(s, x + dx, y + dy, z);
+    const ore = k % 2 === 0;
+    ellipse(s, cx - 0.5, cy - 1.5, 2.2, 1.7, ore ? C('clay', 3) : C(stone, 3));
+    px(s, cx - 1, cy - 3, ore ? C('clay', 6) : C(stone, 5));
+    px(s, cx, cy - 3, ore ? C('clay', 5) : C(stone, 4));
+    px(s, cx + 1, cy - 1, ore ? C('clay', 2) : C(stone, 2));
+  });
+}
+
+// The store (step 3 of docs/gameplay-spec.md) holds grain, wood and ore, and shows all three so the
+// hand can tell them apart (src/systems/hand.js storeKindAt draws by the third of the sprite under
+// the pointer): the ore heap on the left (low x, high y), the barn with its grain sacks in the
+// middle, the log stack on the right (high x, low y).
+function playerStore() {
+  const x0 = -0.78, x1 = 0.22, y0 = -0.82, y1 = 0.2, zw = 12;
   return {
     apron: aprons.yard, body: [x0, y0, x1, y1, zw],
-    draw(g) {
+    draw(g, o) {
+      const { s } = g;
       box(g, x0 - 0.05, y0 - 0.05, x1 + 0.05, y1 + 0.05, -3, 3, { front: mat.fieldstone(4), side: mat.fieldstone(2), top: C('stone', 5) });
       box(g, x0, y0, x1, y1, 3, zw, { front: mat.planks(4), side: mat.planks(2) });
       // Plank gable on the front (+y) end.
-      face(g, [x0, y1, zw], [x1 - x0, 0, 0], [(x1 - x0) / 2, 0, 11], mat.planks(4), true);
+      face(g, [x0, y1, zw], [x1 - x0, 0, 0], [(x1 - x0) / 2, 0, 10], mat.planks(4), true);
       // Wide double door standing open, sacks inside.
-      face(g, [-0.36, y1 + 0.001, 3], [0.62, 0, 0], [0, 0, 10], (u, v, f) => {
+      face(g, [x0 + 0.22, y1 + 0.001, 3], [0.56, 0, 0], [0, 0, 9], (u, v, f) => {
         if (u < 1 || u > f.lu - 1 || v > f.lv - 1) return C('bark', 1);
         if (v < 4 && u > 3 && u < 7) return C('sand', v > 2.5 ? 4 : 3);
         return C('ink', 1);
       });
-      // Hay loft hatch in the gable.
-      face(g, [-0.1, y1 + 0.001, 16], [0.18, 0, 0], [0, 0, 4], (u, v, f) => (u < 1 || v < 1 ? C('bark', 1) : C('ink', 1)));
-      // Shingle roof, ridge along y.
-      const rx0 = x0 - 0.2, rx1 = x1 + 0.2, ry0 = y0 - 0.1, ry1 = y1 + 0.12;
-      gableY(g, rx0, rx1, ry0, ry1, 10, 26, mat.shingles(3), mat.shingles(5), C('bark', 1));
-      // Front left: lean of the slope toward the light gets the lit shade via the back-slope material.
-      barrel(g, 0.52, y1 + 0.2, 0, 6, 'bark');
-      sack(g, -0.5, y1 + 0.28);
-      sack(g, -0.3, y1 + 0.36);
+      const rx0 = x0 - 0.18, rx1 = x1 + 0.18, ry0 = y0 - 0.1, ry1 = y1 + 0.12;
+      gableY(g, rx0, rx1, ry0, ry1, 9, 24, mat.shingles(3), mat.shingles(5), C('bark', 1));
+      // Wood on the right: the log stack between its posts.
+      for (const [x, y] of [[0.36, -0.86], [0.86, -0.86]]) line(s, ...P(s, x, y, 0), ...P(s, x, y, 11), C('bark', 2));
+      logStack(g, 0.62, -0.5, 0.62, o.char);
+      for (const [x, y] of [[0.36, -0.12], [0.86, -0.12]]) {
+        const [a, b] = P(s, x, y, 0), [c, d] = P(s, x, y, 11);
+        line(s, a, b, c, d, C('bark', 3));
+        px(s, c, d, C('bark', 5));
+      }
+      // Ore on the left: a heap in a plank bin, a pick leaning on it.
+      box(g, -0.92, 0.3, -0.84, 0.9, 0, 4, { front: C('bark', 3), side: C('bark', 2), top: C('bark', 5) });
+      oreHeap(g, -0.55, 0.6);
+      const [hx, hy] = P(s, -0.22, 0.86, 0);
+      line(s, hx, hy, hx - 2, hy - 7, C('bark', 4));
+      line(s, hx - 4, hy - 7, hx, hy - 8, C('ink', 5));
+      // Grain in the middle, by the door.
+      sack(g, 0.0, 0.5);
+      sack(g, 0.2, 0.58);
+      barrel(g, 0.4, 0.3, 0, 6, 'bark');
     },
   };
 }
 
-function rivalStorehouse() {
-  const x0 = -0.78, x1 = 0.78, y0 = -0.5, y1 = 0.5, zw = 12;
+function rivalStore() {
+  const x0 = -0.8, x1 = 0.25, y0 = -0.8, y1 = 0.15, zw = 11;
   return {
     apron: aprons.cobbles, body: [x0, y0, x1, y1, zw],
-    draw(g) {
+    draw(g, o) {
       box(g, x0, y0, x1, y1, 0, zw, { front: mat.blocks(5, STONE_R), side: mat.blocks(3, STONE_R) });
       // Barrel vault along x: half cylinder of clay tiles, back segments first.
-      const N = 10, rv = (y1 - y0) / 2 + 0.04, hv = 9;
+      const N = 10, rv = (y1 - y0) / 2 + 0.04, hv = 8, yc = (y0 + y1) / 2;
       const segs = [];
       for (let k = 0; k < N; k++) {
         const a0 = Math.PI * (k / N), a1 = Math.PI * ((k + 1) / N);
@@ -472,63 +503,76 @@ function rivalStorehouse() {
       }
       segs.sort((p, q) => p.ny - q.ny);
       for (const sg of segs) {
-        const ya = -Math.cos(sg.a0) * rv, za = Math.sin(sg.a0) * hv, yb = -Math.cos(sg.a1) * rv, zb = Math.sin(sg.a1) * hv;
-        const lit = 2.5 + 3.5 * Math.max(0, 0.75 * Math.sin((sg.a0 + sg.a1) / 2) + 0.45 * -sg.ny * -1);
+        const ya = yc - Math.cos(sg.a0) * rv, za = Math.sin(sg.a0) * hv, yb = yc - Math.cos(sg.a1) * rv, zb = Math.sin(sg.a1) * hv;
+        const lit = 2.5 + 3.5 * Math.max(0, 0.75 * Math.sin((sg.a0 + sg.a1) / 2) + 0.45 * sg.ny);
         face(g, [x0 - 0.04, ya, zw + za], [x1 - x0 + 0.08, 0, 0], [0, yb - ya, zb - za], mat.clayTiles(lit));
       }
-      // Tympanum: the vault's end wall (half ellipse) on the +x side.
       const { s } = g;
       const pts = [];
-      for (let k = 0; k <= N; k++) { const a = Math.PI * (k / N); pts.push([x1, -Math.cos(a) * (rv - 0.04), zw + Math.sin(a) * (hv - 1)]); }
+      for (let k = 0; k <= N; k++) { const a = Math.PI * (k / N); pts.push([x1, yc - Math.cos(a) * (rv - 0.04), zw + Math.sin(a) * (hv - 1)]); }
       if (zw + 2 <= g.clip) polygon(s, pts.map(([x, y, z]) => P(s, x, y, z)), C(STONE_R, 3));
-      // Arched doorway on the front, a window on the side, jars by the door.
-      arch(g, 'y', y1, 0.1, 0.34, 0, 10);
-      arch(g, 'x', x1, 0, 0.14, 5, 5);
-      jar(g, -0.45, y1 + 0.24);
-      jar(g, -0.25, y1 + 0.32);
-      sack(g, 0.45, y1 + 0.3);
+      arch(g, 'y', y1, -0.3, 0.32, 0, 9);
+      // Wood on the right in a low sandstone bay.
+      box(g, 0.34, -0.9, 0.9, -0.8, 0, 8, { front: mat.blocks(4, STONE_R, 3, 5), side: mat.blocks(3, STONE_R, 3, 5), top: C(STONE_R, 6) });
+      logStack(g, 0.62, -0.5, 0.6, o.char);
+      // Ore on the left in a sandstone bin.
+      box(g, -0.92, 0.28, -0.82, 0.9, 0, 5, { front: mat.blocks(4, STONE_R, 3, 5), side: mat.blocks(3, STONE_R, 3, 5), top: C(STONE_R, 6) });
+      oreHeap(g, -0.55, 0.6, 'ink');
+      // Grain in the middle: jars and a sack by the door.
+      jar(g, 0.05, 0.45);
+      jar(g, 0.25, 0.55);
+      sack(g, 0.45, 0.32);
     },
   };
 }
 
-function playerWoodpile() {
-  return {
-    apron: (s, fw, fh) => apron(s, fw, fh, (wx, wy, x, y, edge) => {
-      const n = hash(x, y, 61);
-      if (edge < 0.08 && n % 2) return C('grass', 3);
-      if (n % 7 === 0) return C('sand', 5); // wood chips
-      return C('dirt', 4 - (n % 4 === 0 ? 1 : 0));
-    }),
-    body: [-0.38, -0.32, 0.38, 0.32, 10],
-    draw(g, o) {
-      const { s } = g;
-      // Back posts, the stack, front posts; chopping block with the axe set in it.
-      for (const [x, y] of [[-0.42, -0.34], [0.42, -0.34]]) line(s, ...P(s, x, y, 0), ...P(s, x, y, 11), C('bark', 2));
-      logStack(g, 0, 0, 0.62, o.char);
-      for (const [x, y] of [[-0.42, 0.34], [0.42, 0.34]]) {
-        const [a, b] = P(s, x, y, 0), [c, d] = P(s, x, y, 11);
-        line(s, a, b, c, d, C('bark', 3));
-        px(s, c, d, C('bark', 5));
-      }
-      barrel(g, 0.36, 0.42, 0, 3, 'bark', [2, 3, 6]);
-      const [hx, hy] = P(s, 0.36, 0.42, 5);
-      line(s, hx - 1, hy - 1, hx + 1, hy - 4, C('bark', 4));
-      px(s, hx - 2, hy, C('ink', 5)); px(s, hx - 1, hy, C('ink', 6));
-    },
-  };
-}
-
-function rivalWoodpile() {
-  return {
-    apron: aprons.cobbles,
-    body: [-0.42, -0.4, 0.42, 0.34, 10],
-    draw(g, o) {
-      // Low sandstone bay behind the logs.
-      box(g, -0.44, -0.44, 0.44, -0.3, 0, 9, { front: mat.blocks(4, STONE_R, 3, 5), side: mat.blocks(3, STONE_R, 3, 5), top: C(STONE_R, 6) });
-      box(g, -0.44, -0.3, -0.32, 0.36, 0, 9, { front: mat.blocks(4, STONE_R, 3, 5), side: mat.blocks(3, STONE_R, 3, 5), top: C(STONE_R, 6) });
-      logStack(g, 0.06, 0.02, 0.6, o.char);
-      jar(g, 0.38, 0.38);
-    },
+// The mine (step 3): a prebuilt adit into a rocky knoll, timbered, with rails running out to an ore
+// heap. `empty` (worked out) boards the entrance and leaves the heap bare. Player: grey rock and
+// timber; rival: sandstone, clay and ink only, as every rival building (the alignment never repaints it).
+function mine(owner) {
+  return () => {
+    const rival = owner === 'rival';
+    const stone = rival ? STONE_R : 'rock', timber = rival ? 'clay' : 'bark';
+    const rough = (b) => mat.fieldstone(b, stone, !rival);
+    return {
+      apron: rival ? aprons.cobbles : (s, fw, fh) => apron(s, fw, fh, (wx, wy, x, y, edge) => {
+        const n = hash(x, y, 63);
+        if (edge < 0.08 && n % 2) return C('grass', 3);
+        if (n % 9 === 0) return C(stone, 3); // spoil chips
+        return C('dirt', 3 + (n % 5 === 0 ? 1 : 0));
+      }),
+      body: [-0.9, -0.9, 0.7, 0.1, 22],
+      draw(g, o) {
+        const { s } = g;
+        // The knoll: uneven masses of rough stone, highest at the back left, a shoulder on the right.
+        box(g, -0.92, -0.92, 0.72, 0.1, 0, 9, { front: rough(4), side: rough(2), top: C(stone, 5) });
+        box(g, -0.9, -0.9, -0.05, -0.15, 9, 20, { front: rough(4), side: rough(2), top: C(stone, 5) });
+        box(g, 0.05, -0.9, 0.62, -0.35, 9, 15, { front: rough(4), side: rough(2), top: C(stone, 6) });
+        box(g, -0.75, -0.9, -0.35, -0.5, 20, 25, { front: rough(5), side: rough(3), top: C(stone, 6) });
+        if (!rival) for (const [x, y, z] of [[-0.6, -0.3, 20], [0.3, -0.5, 15], [0.5, -0.1, 9], [-0.55, -0.6, 25]]) { // grass on the ledges
+          const [a, b] = P(s, x, y, z);
+          px(s, a, b - 1, C('grass', 4)); px(s, a + 1, b - 1, C('grass', 3)); px(s, a - 1, b, C('grass', 3));
+        }
+        // The adit in the front face: a dark mouth (boarded once worked out) in a timber frame whose
+        // posts and lintel stand proud of the rock.
+        const ax0 = -0.5, ax1 = 0.0, ay = 0.1, ah = 12;
+        face(g, [ax0, ay + 0.001, 0], [ax1 - ax0, 0, 0], [0, 0, ah], (u, v, f) => {
+          if (o.empty) return Math.floor(v / 2.5) % 2 ? C(timber, 3) : C(timber, 2);
+          return C('ink', v > f.lv - 3 ? 1 : 0);
+        });
+        for (const x of [ax0, ax1]) box(g, x - 0.05, ay, x + 0.05, ay + 0.1, 0, ah + 1, { front: C(timber, 4), side: C(timber, 2), top: C(timber, 5) });
+        box(g, ax0 - 0.1, ay, ax1 + 0.1, ay + 0.12, ah, ah + 3, { front: C(timber, 4), side: C(timber, 2), top: C(timber, 6) });
+        // Rails out of the adit to the front edge, on sleepers.
+        for (let k = 0; k < 5; k++) { const yy = 0.28 + k * 0.15; line(s, ...P(s, -0.38, yy, 0), ...P(s, -0.1, yy, 0), C(timber, 2)); }
+        for (const dx of [-0.34, -0.14]) line(s, ...P(s, dx, 0.22, 0), ...P(s, dx, 0.96, 0), C('ink', 4));
+        if (!o.empty) {
+          // A loaded cart on the rails and the ore heap beside them.
+          box(g, -0.4, 0.5, -0.08, 0.76, 1, 6, { front: C(timber, 3), side: C(timber, 2), top: C('clay', 4) });
+          oreHeap(g, 0.38, 0.5, rival ? 'ink' : 'rock');
+          oreHeap(g, 0.56, 0.7, rival ? 'ink' : 'rock');
+        }
+      },
+    };
   };
 }
 
@@ -608,8 +652,8 @@ function rivalTemple() {
 
 const MODELS = {
   house: { player: playerHouse, rival: rivalHouse },
-  storehouse: { player: playerStorehouse, rival: rivalStorehouse },
-  woodpile: { player: playerWoodpile, rival: rivalWoodpile },
+  store: { player: playerStore, rival: rivalStore },
+  mine: { player: mine('player'), rival: mine('rival') },
   temple: { player: playerTemple, rival: rivalTemple },
 };
 
@@ -729,7 +773,7 @@ function render(kind, model, opts) {
   model.apron(ground, fw, fh);
   if (stage === 'building') { g.clip = Math.round(model.body[4] * 0.45); g.jag = 2; }
   if (stage === 'wrecked') { g.clip = 7; g.jag = 5; }
-  model.draw(g, { owner: opts.owner, char: stage === 'wrecked' });
+  model.draw(g, { owner: opts.owner, char: stage === 'wrecked', empty: !!opts.empty });
 
   if (stage === 'blueprint') {
     const out = createSprite(s0.w, s0.h, s0.ax, s0.ay);
@@ -899,6 +943,7 @@ function normalize(opts = {}) {
     owner: opts.owner === 'rival' ? 'rival' : 'player',
     stage: STAGES.includes(opts.stage) ? opts.stage : 'done',
     growth: opts.growth,
+    empty: opts.empty ? true : undefined,
   };
 }
 
@@ -912,8 +957,8 @@ export const TEMPLE_PEDESTALS = PEDESTALS;
 
 export const sprites = {
   house: building('house'),
-  storehouse: building('storehouse'),
-  woodpile: building('woodpile'),
+  store: building('store'),
+  mine: building('mine'),
   temple: building('temple'),
   field: (opts) => field(normalize(opts)),
 };
@@ -926,5 +971,6 @@ for (const owner of ['player', 'rival']) {
   for (const stage of ['blueprint', 'building', 'wrecked']) fieldPv.push({ owner, stage, growth: 0 });
 }
 export const previews = {
-  house: allStages, storehouse: allStages, woodpile: allStages, temple: allStages, field: fieldPv,
+  house: allStages, store: allStages, temple: allStages, field: fieldPv,
+  mine: ['player', 'rival'].flatMap((owner) => [{ owner, stage: 'done' }, { owner, stage: 'done', empty: true }]),
 };

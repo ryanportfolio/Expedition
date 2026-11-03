@@ -133,7 +133,8 @@ function fireRun(seed, { rainAt = null } = {}) {
 }
 
 // ---- 3c. one fire cast in the player village burns a small cluster, then goes out
-// Real village (village.setup()). For seeds 1-6: a cast on the village centre destroys 1-4 buildings,
+// Real village (village.setup()). For seeds 1-6: a cast on the building nearest the village centre
+// (the store; since step 3 the centre itself is an open square with nothing in fire range) destroys 1-4 buildings,
 // spreads to at most spreadBudget entities past the ones the cast lit, and every fire is out within
 // one burn per generation the blaze can reach; a cast on a house destroys that house; for seeds 1-8 a
 // cast on the most central house wrecks it, destroys 1-4 buildings and usually a neighbour; a cast on
@@ -154,7 +155,9 @@ function fireRun(seed, { rainAt = null } = {}) {
   for (let seed = 1; seed <= 6; seed++) {
     const { game, destroyed, M, t } = villageGame(seed);
     const site = game.world.sites.village;
-    M.cast('fire', site.x + 0.5, site.y + 0.5, { free: true });
+    const d = (b) => Math.hypot(b.x - (site.x + 0.5), b.y - (site.y + 0.5));
+    const central = game.world.query({ kind: 'building' }).filter((b) => b.owner === 'player' && b.type !== 'temple').sort((a, b) => d(a) - d(b) || a.id - b.id)[0];
+    M.cast('fire', central.x, central.y, { free: true });
     t.step(F.igniteDelay + 0.05);
     const byCast = new Set(lit(game));
     const caught = new Set(byCast);
@@ -167,7 +170,7 @@ function fireRun(seed, { rainAt = null } = {}) {
     rows.push({ seed, destroyed: destroyed.length, types: destroyed.join('/'), byCast: byCast.size, spread: caught.size - byCast.size, outAt });
   }
   const fmtRow = (r) => `seed ${r.seed}: ${r.destroyed} (${r.types}), spread ${r.spread}, out at ${r.outAt?.toFixed(1)} s`;
-  assert(rows.every((r) => r.destroyed >= 1 && r.destroyed <= 4), `a fire cast on the village centre destroys 1-4 buildings (${rows.map((r) => `${r.seed}: ${r.destroyed}`).join(', ')})`);
+  assert(rows.every((r) => r.destroyed >= 1 && r.destroyed <= 4), `a fire cast on the building nearest the village centre destroys 1-4 buildings (${rows.map((r) => `${r.seed}: ${r.destroyed}`).join(', ')})`);
   assert(rows.every((r) => r.byCast >= 1 && r.spread <= F.spreadBudget), `spread past the cast stays within the blaze budget of ${F.spreadBudget} (${rows.map((r) => r.spread).join(', ')})`);
   assert(rows.every((r) => r.outAt !== null && r.outAt <= bound), `every fire is out within ${bound.toFixed(1)} s of the cast (${rows.map((r) => r.outAt?.toFixed(1)).join(', ')})`);
   for (const r of rows) console.log(`  info: village fire ${fmtRow(r)}`);

@@ -42,7 +42,7 @@ export const TUNING = {
     rampRate: 0.5, // burning per second while a fire grows toward 1
     burnTime: 9, // seconds an entity burns before the fire dies down
     fadeTime: 2.5, // seconds from burning 1 to 0 once it dies down
-    /** hp lost per second at burning 1, by building type or else by kind. A house, store, woodpile or
+    /** hp lost per second at burning 1, by building type or else by kind. A house, store or
      * field that catches burns to hp 0 unless rain puts it out: lit by the miracle it is a wreck
      * after about 7 s, caught by spread after about 8 s. The stone temple loses about half its hp to
      * a full burn and stands: a wrecked temple can't be rebuilt, and the orb pedestals stand beside

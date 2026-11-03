@@ -1,4 +1,5 @@
-// Terrain painters: trees (pine and broadleaf, five growth stages), stumps and boulders.
+// Terrain painters: trees (pine and broadleaf, five growth stages), stumps and boulders (plain, or
+// ore rocks streaked with rust-red veins).
 // Pure and deterministic; light from the top-left; anchors on the ground contact point (trunk
 // base, stump base, boulder base center), which is the bottom outline row.
 
@@ -9,6 +10,7 @@ const F = (s) => idx('foliage', s);
 const B = (s) => idx('bark', s);
 const R = (s) => idx('rock', s);
 const M = (s) => idx('moss', s);
+const O = (s) => idx('clay', s);
 
 /** Small integer hash for deterministic per-sprite variation. */
 function hash(a, b) {
@@ -211,7 +213,19 @@ function boulder(s, cx, base, rx, ry, seed, mossy) {
 
 const ROCK_SIZES = { 1: [3, 2.5], 2: [5, 4], 3: [7, 5.5] };
 
-function rock({ size = 2 } = {}) {
+/** Ore streaks: rust-red veins and flecks over the lit and mid faces of a boulder, a few bright
+ * glints on top, so an ore rock reads apart from plain stone at a glance. */
+function oreVeins(s, seed) {
+  for (let y = 0; y < s.h; y++) for (let x = 0; x < s.w; x++) {
+    const v = get(s, x, y);
+    if (v < R(2) || v > R(6)) continue;
+    const vein = hash(x + y * 2, seed) < 0.16 || hash((x - y) * 3, seed + 5) < 0.07;
+    if (vein) px(s, x, y, O(Math.min(6, Math.max(2, v - R(0) + 1))));
+    else if (v >= R(5) && hash(x * 5, y + seed) < 0.06) px(s, x, y, O(7));
+  }
+}
+
+function rock({ size = 2, ore = false } = {}) {
   const sz = ROCK_SIZES[size] ? size : 2;
   const [rx, ry] = ROCK_SIZES[sz];
   const W = 18, H = 16;
@@ -220,6 +234,7 @@ function rock({ size = 2 } = {}) {
   if (sz === 3) boulder(s, 6.5, base, 3, 2.4, 41, false); // a smaller stone behind on the left
   boulder(s, 9, base, rx, ry, 7 + sz, sz >= 2);
   if (sz >= 2) boulder(s, 9 + rx, base, 1.6, 1.4, 19 + sz, false); // chip at the foot
+  if (ore) oreVeins(s, 31 + sz);
   return outline(trim(s), R(0));
 }
 
@@ -229,5 +244,5 @@ const GROWTHS = [0, 0.25, 0.5, 0.75, 1];
 export const previews = {
   tree: [...GROWTHS.map((growth) => ({ species: 'pine', growth })), ...GROWTHS.map((growth) => ({ species: 'broad', growth }))],
   stump: [{}],
-  rock: [{ size: 1 }, { size: 2 }, { size: 3 }],
+  rock: [{ size: 1 }, { size: 2 }, { size: 3 }, { size: 1, ore: true }, { size: 2, ore: true }, { size: 3, ore: true }],
 };

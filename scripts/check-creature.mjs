@@ -9,7 +9,7 @@
 // than 2, never into water), the movement sampler catching a planted cliff jump and water tile, a
 // tether next to the sea stops on the shore, a tether for another creature id is ignored, hp 0 is
 // restored and a removed creature comes back. Haul delivery on a flat map (round 39): a blueprint
-// removed or a woodpile wrecked while the load goes in (no crash, the load is set down), a blueprint
+// removed or a store wrecked while the load goes in (no crash, the load is set down), a blueprint
 // one log short of a two-log load (one goes in, one is set down). Rocks: a rock the hand moved is
 // offered only where it lies, and throwing it leaves one rock entity and the map's rock list; a rock
 // it threw, caught by the hand and let go between ticks, lands once (round 46). Untrained defaults on seeds 13, 21, 4 (harm limits,
@@ -169,7 +169,7 @@ for (const withGrain of [true, false]) {
   events.on('act', (a) => { if (a.actor === 'creature' && keyOf(a) in n) n[keyOf(a)]++; });
   const stock = () => {
     for (const b of world.query({ kind: 'building' })) {
-      if (b.type === 'storehouse') b.grain = withGrain ? Math.max(b.grain, 30) : 0;
+      if (b.type === 'store') b.grain = withGrain ? Math.max(b.grain, 30) : 0;
       if (b.type === 'field') b.growth = Math.min(b.growth, 0.5);
     }
   };
@@ -458,14 +458,14 @@ function haulCase(dest, load = 2, water = () => false) {
     `haul: blueprint removed while the load is put in: no crash, the whole load is set down (${err ? `threw ${err.message}` : `${h.last()?.phase}, ${w?.amount} logs, on the ground ${h.onGround(w)}`})`);
 }
 {
-  const h = haulCase({ type: 'woodpile', stage: 'done' });
+  const h = haulCase({ type: 'store', stage: 'done' });
   const reached = h.run(h.putting);
   h.b.hp = 0; h.b.stage = 'wrecked'; // burned down while the load goes in
   let err = null;
   try { for (let i = 0; i < 60; i++) h.game.tick(1 / 30); } catch (e) { err = e; }
   const w = h.world.get(h.wood.id);
   check(reached && !err && h.b.wood === 0 && h.onGround(w) && w.amount === 2 && /^abort/.test(h.last()?.phase ?? ''),
-    `haul: woodpile wrecked while the load is put in: nothing goes into the wreck, the load is set down (${err ? `threw ${err.message}` : `${h.last()?.phase}, pile ${h.b.wood}, ${w?.amount} logs on the ground ${h.onGround(w)}`})`);
+    `haul: store wrecked while the load is put in: nothing goes into the wreck, the load is set down (${err ? `threw ${err.message}` : `${h.last()?.phase}, pile ${h.b.wood}, ${w?.amount} logs on the ground ${h.onGround(w)}`})`);
 }
 {
   const h = haulCase({ type: 'house', stage: 'blueprint', woodCost: 4, woodHave: 3 });
@@ -477,31 +477,31 @@ function haulCase(dest, load = 2, water = () => false) {
   check(h.onGround(w) && w.amount === 1 && Math.hypot(w.x - e.x, w.y - e.y) < 1e-6,
     `haul: the surplus log stays a wood item at the creature's feet (${w ? `${w.amount} logs, on the ground ${h.onGround(w)}, ${Math.hypot(w.x - e.x, w.y - e.y).toFixed(2)} from it` : 'gone'})`);
 }
-// A haul out of a woodpile takes no more than the blueprint it goes to still lacks: 3 of the pile's
+// A haul out of a store takes no more than the blueprint it goes to still lacks: 3 of the pile's
 // 100 for a site 3 short, so the pile keeps the rest and no surplus is left on the ground. The site
-// sits within senseRadius of the creature: a woodpile haul is offered only while a site is in range.
+// sits within senseRadius of the creature: a store haul is offered only while a site is in range.
 {
   const h = haulCase({ type: 'house', stage: 'blueprint', woodCost: 10, woodHave: 7, x: 9, y: 9, tx: 8, ty: 8 });
   h.world.remove(h.wood.id);
-  const pile = h.world.spawn('building', { x: 8, y: 4, vx: 0, vy: 0, vz: 0, tx: 7, ty: 3, fw: 2, fh: 2, owner: 'player', hp: 1, burning: 0, flammable: false, grabbable: false, type: 'woodpile', stage: 'done', wood: 100, grain: 0 });
+  const pile = h.world.spawn('building', { x: 8, y: 4, vx: 0, vy: 0, vz: 0, tx: 7, ty: 3, fw: 2, fh: 2, owner: 'player', hp: 1, burning: 0, flammable: false, grabbable: false, type: 'store', stage: 'done', wood: 100, grain: 0 });
   h.cs.debug.candidateFilter = (c) => c.key === 'haul:wood' && c.target?.id === pile.id;
   const done = h.run(() => h.last()?.phase === 'complete');
   const loose = h.world.query({ kind: 'wood' });
   check(done && h.b.woodHave === 10 && pile.wood === 97 && loose.length === 0,
-    `haul: from a woodpile the creature takes only what the site lacks (site ${h.b.woodHave} of ${h.b.woodCost}, pile ${pile.wood} of 100, ${loose.reduce((s, w) => s + (w.amount ?? 1), 0)} logs left on the ground)`);
+    `haul: from a store the creature takes only what the site lacks (site ${h.b.woodHave} of ${h.b.woodCost}, pile ${pile.wood} of 100, ${loose.reduce((s, w) => s + (w.amount ?? 1), 0)} logs left on the ground)`);
 }
 // The only site in range sits behind water (a moat of water tiles around it): with nowhere reachable
-// to carry a load, the creature leaves the woodpile alone instead of taking pileHaul and dropping it.
+// to carry a load, the creature leaves the store alone instead of taking pileHaul and dropping it.
 {
   const moat = (x, y) => x >= 6 && x <= 12 && y >= 6 && y <= 12 && (x === 6 || x === 12 || y === 6 || y === 12);
   const h = haulCase({ type: 'house', stage: 'blueprint', woodCost: 10, woodHave: 7, x: 9, y: 9, tx: 8, ty: 8 }, 2, moat);
   h.world.remove(h.wood.id);
-  const pile = h.world.spawn('building', { x: 8, y: 4, vx: 0, vy: 0, vz: 0, tx: 7, ty: 3, fw: 2, fh: 2, owner: 'player', hp: 1, burning: 0, flammable: false, grabbable: false, type: 'woodpile', stage: 'done', wood: 100, grain: 0 });
+  const pile = h.world.spawn('building', { x: 8, y: 4, vx: 0, vy: 0, vz: 0, tx: 7, ty: 3, fw: 2, fh: 2, owner: 'player', hp: 1, burning: 0, flammable: false, grabbable: false, type: 'store', stage: 'done', wood: 100, grain: 0 });
   h.cs.debug.candidateFilter = (c) => c.key === 'haul:wood' && c.target?.id === pile.id;
   const ended = h.run(() => /^(complete|abort)/.test(h.last()?.phase ?? ''));
   const loose = h.world.query({ kind: 'wood' });
   check(ended && h.last().phase === 'abort:no-dest' && pile.wood === 100 && loose.length === 0 && h.b.woodHave === 7,
-    `haul: with the only site behind water, the woodpile is left alone (${h.last()?.phase}, pile ${pile.wood} of 100, ${loose.reduce((s, w) => s + (w.amount ?? 1), 0)} logs on the ground)`);
+    `haul: with the only site behind water, the store is left alone (${h.last()?.phase}, pile ${pile.wood} of 100, ${loose.reduce((s, w) => s + (w.amount ?? 1), 0)} logs on the ground)`);
 }
 
 // ---- rocks (round 39): once the terrain system has made rock entities for a map, the creature

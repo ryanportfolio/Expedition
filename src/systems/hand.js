@@ -1,5 +1,5 @@
 // Hand system: the player's divine hand. It floats over the terrain under the pointer, picks up,
-// carries and throws things, draws grain and wood out in bulk, strokes and slaps the creature, and
+// carries and throws things, draws grain, wood and ore out in bulk, strokes and slaps the creature, and
 // points the creature somewhere.
 //
 // Input map (user decisions): left press on a grabbable thing grabs it; dragging carries it and
@@ -10,19 +10,21 @@
 //
 // The hand in bulk (gameplay spec step 1):
 // - Drawing. Holding the left button (past drawDelay, so a click takes nothing) on one of the
-//   player's fields draws its grain, on a storehouse its grain, on a woodpile its wood; on a tree, a press held still for treeDrawDelay draws the
-//   tree's wood (a tree drained empty is gone), while a press that moves pulls the tree up as
-//   before. The amount grows faster the longer the button is held (HAND.draw) and rides in the hand
-//   as one wood or grain pile. While the button stays down the hand keeps drawing from every source
+//   player's fields draws its grain; on a store, the resource under the pointer: its left third (the
+//   ore heap) ore, the middle (the barn) grain, the right third (the log stack) wood (storeKindAt).
+//   On a tree or an ore rock, a press held still for treeDrawDelay draws the tree's wood or the
+//   rock's ore (one drained empty is gone), while a press that moves picks it up as before. The amount grows faster the longer the button is held (HAND.draw) and rides in the hand
+//   as one grain, wood or ore pile. While the button stays down the hand keeps drawing from every source
 //   of that resource it passes over (stores only when the press began on a store).
-// - Dropping a pile or a tree slowly on a player storehouse (grain) or woodpile (wood, trees) puts it
-//   in stock; on a blueprint short of wood it pays wood in, the rest is left beside it.
+// - Dropping a pile, a tree or an ore rock slowly on a player store puts it in stock, as much as the
+//   store has room for (VILLAGE.storeCap of each resource); wood or a tree on a blueprint short of
+//   wood pays wood in, the rest is left beside it.
 // - Pouring. Holding a wood pile over a player site for pourDelay pours it in and god-builds the site
 //   (godBuild in src/village/sim.js: the whole job costs VILLAGE.godBuildFactor x the wood).
 // - Multi pick-up (HAND.multiPickup). Sweeping across villagers or trees with the button down after
 //   grabbing one of them adds every one of that kind the hand passes over, once the pointer has
 //   moved sweepStart from the press. A group of two or more let go slowly stays in the hand (a tree
-//   group let go slowly over a woodpile or blueprint goes in at once); let go fast, it is thrown; then a click puts one out (thrown if the click flicks), and holding
+//   group let go slowly over a store or blueprint goes in at once); let go fast, it is thrown; then a click puts one out (thrown if the click flicks), and holding
 //   the button puts them out one per pourInterval where the hand goes.
 // - Shaking the hand (shakeReversals fast direction changes) or Escape (unless a building is picked
 //   for placing) empties it: everything held
@@ -47,7 +49,7 @@ import { pickEntity } from '../hand/pick.js';
 import { createStrokeTracker } from '../hand/stroke.js';
 import { shadowFor, shadowItem, outlineItem, drawTop } from '../hand/draw.js';
 import { getSprite, listSprites } from '../art/registry.js';
-import { woodIn } from '../village/config.js';
+import { woodIn, oreIn } from '../village/config.js';
 import { removeTree } from '../village/sim.js';
 import '../hand/placeholder-art.js';
 
@@ -102,6 +104,16 @@ export function create(game) {
   /** The player building under the pointer that passes test(b): the one whose sprite is under it,
    * else the one whose footprint holds the hand's ground point (a house drawn over a field in front of
    * it does not hide the field). */
+  /** The store resource under the pointer on store b: by the pointer's view x against the store's
+   * centre, the left third ore, the middle grain, the right third wood, as the store is drawn. */
+  function storeKindAt(b) {
+    const v = camera.worldToView(b.x, b.y, b.z ?? world.heightAt(b.x, b.y));
+    const third = ((b.fw ?? 2) + (b.fh ?? 2)) * 16 / 6;
+    const dx = p.sx - v.sx;
+    return dx < -third ? 'ore' : dx > third ? 'wood' : 'grain';
+  }
+  /** A press on a tree or an ore rock waits (pending) to see whether it draws or picks up. */
+  const drawable = (e) => e?.kind === 'tree' || (e?.kind === 'rock' && oreIn(e) >= 1);
   function buildingUnder(test) {
     const s = sim();
     if (!s) return null;
@@ -146,11 +158,11 @@ export function create(game) {
       return;
     }
     const e = pickTouchable();
-    if (e?.kind === 'tree') { press = { mode: 'pending', id: e.id, t: 0, sx: p.sx, sy: p.sy }; return; }
+    if (drawable(e)) { press = { mode: 'pending', id: e.id, src: e.kind, t: 0, sx: p.sx, sy: p.sy }; return; }
     if (e && e.kind !== 'creature') { grab(e); press = { mode: 'grab', t: 0, sx: p.sx, sy: p.sy }; return; }
     if (!e) {
       const b = buildingUnder((o) => sim().handSource(o));
-      const kind = b && sim().handSource(b);
+      const kind = b && (b.type === 'store' ? sim().handSource(b, { kind: storeKindAt(b) }) : sim().handSource(b));
       // the press may still turn out to be a rub across the creature or a click: it keeps a gesture
       if (kind) press = { mode: 'draw', t: 0, kind, trees: false, stores: b.type !== 'field' };
     }
@@ -162,7 +174,7 @@ export function create(game) {
     const pr = press, g = gesture;
     press = null;
     gesture = null;
-    if (pr?.mode === 'shaken' || pr?.mode === 'pending') return; // a click on a tree does nothing
+    if (pr?.mode === 'shaken' || pr?.mode === 'pending') return; // a click on a tree or an ore rock does nothing
     if (pr?.mode === 'put') {
       // one click puts one out: dropped, or thrown when the click flicks
       if (!pr.put) { const e = heldList()[0]; if (e) releaseOne(e, releaseVelocity(p.vsx, p.vsy)); }
@@ -230,15 +242,16 @@ export function create(game) {
     // orbs report their own act when the miracle is cast
     if (e.kind !== 'orb') act(v.thrown ? 'throw' : 'drop', e.kind, v.thrown ? HAND.weights.throw : HAND.weights.drop, e.x, e.y);
     if (v.thrown || shaken || !world.get(e.id)) return;
-    const b = sinkUnder(e.kind);
+    const b = sinkUnder(e.kind, e);
     if (b) sim().handPut(b, e);
   }
 
-  /** The player building under the hand that takes a drop of `kind` ('grain', 'wood', 'tree'), or null. */
-  function sinkUnder(kind) {
+  /** The player building under the hand that takes a drop of `kind` (a pile kind, 'tree' or 'rock';
+   * `e` the thing dropped, for a rock's ore), or null. */
+  function sinkUnder(kind, e = null) {
     const s = sim();
-    if (!s || !(PILE_KINDS.has(kind) || kind === 'tree')) return null;
-    return buildingUnder((b) => s.handSink(b, kind));
+    if (!s || !(PILE_KINDS.has(kind) || kind === 'tree' || kind === 'rock')) return null;
+    return buildingUnder((b) => s.handSink(b, kind, e));
   }
 
   /** Empties the hand where it is: everything held falls, scattered a little; an orb is cancelled. */
@@ -275,7 +288,10 @@ export function create(game) {
     hand.pouring = null;
     if (!press) return;
     press.t += dt;
-    if (press.mode === 'pending' && press.t >= HAND.treeDrawDelay) press = { mode: 'draw', t: 0, kind: 'wood', trees: true, stores: false, ready: true };
+    if (press.mode === 'pending' && press.t >= HAND.treeDrawDelay) {
+      const rocks = press.src === 'rock';
+      press = { mode: 'draw', t: 0, kind: rocks ? 'ore' : 'wood', trees: !rocks, rocks, stores: false, ready: true };
+    }
     // a press on a field or store that reaches the creature before anything is drawn is a stroke
     if (press.mode === 'draw' && gesture?.creatureId != null && !hand.held.length) { press = null; return; }
     if (press.mode === 'grab') sweep();
@@ -299,9 +315,10 @@ export function create(game) {
     // drawing from a building starts after drawDelay, so a click on a field takes nothing
     if (press.mode === 'draw' && !press.ready && press.t < HAND.drawDelay) return;
     const list = heldList();
-    let pile = null, kind, trees = false, stores = false;
+    let pile = null, kind, trees = false, rocks = false, stores = false;
     if (press.mode === 'draw') {
       ({ kind, trees, stores } = press);
+      rocks = !!press.rocks;
       if (list.length) { if (list.length > 1 || list[0].kind !== kind) return; pile = list[0]; }
     } else {
       // a pile picked up off the ground keeps filling over fields
@@ -313,6 +330,9 @@ export function create(game) {
     if (trees) {
       const tr = pickEntity(world, camera, p.sx, p.sy, (o) => o.kind === 'tree' && canTouch(o) && !o.airborne && !(o.burning > 0), near());
       if (tr) take = (n) => drainTree(tr, n);
+    } else if (rocks) {
+      const r = pickEntity(world, camera, p.sx, p.sy, (o) => o.kind === 'rock' && canTouch(o) && !o.airborne && oreIn(o) >= 1, near());
+      if (r) take = (n) => drainRock(r, n);
     } else {
       const s = sim(), b = s && buildingUnder((o) => s.handSource(o, { kind, stores }));
       if (b) take = (n) => s.handTake(b, kind, n);
@@ -341,6 +361,14 @@ export function create(game) {
       // creature threw was never the player's
       if (!tr.uprooted) act('uproot', 'tree', HAND.weights.uproot, tr.x, tr.y);
     }
+    return got;
+  }
+
+  /** Takes up to n ore out of an ore rock; a rock drawn empty is gone. */
+  function drainRock(r, n) {
+    const left = oreIn(r), got = Math.min(n, left);
+    r.oreLeft = left - got;
+    if (r.oreLeft <= 0) world.remove(r.id);
     return got;
   }
 
@@ -543,7 +571,7 @@ export function create(game) {
     } else {
       hand.z = hand.ground + HAND.hoverZ;
     }
-    hand.load = list.length ? { kind: list[0].kind, count: list.length, amount: list.reduce((a, e) => a + (PILE_KINDS.has(e.kind) ? e.amount ?? 1 : e.kind === 'tree' ? woodIn(e) : 0), 0) } : null;
+    hand.load = list.length ? { kind: list[0].kind, count: list.length, amount: list.reduce((a, e) => a + (PILE_KINDS.has(e.kind) ? e.amount ?? 1 : e.kind === 'tree' ? woodIn(e) : e.kind === 'rock' ? oreIn(e) : 0), 0) } : null;
 
     // stroke: left held, nothing in the hand
     if (gesture && p.buttons & 1 && !list.length && !game.state.uiCapture) {

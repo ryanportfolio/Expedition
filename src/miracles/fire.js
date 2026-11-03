@@ -4,8 +4,8 @@
 // Per burning entity: burning ramps toward 1, the entity loses hp (damage * burning per second),
 // after burnTime the fire dies down over fadeTime, and once burning reaches 0 the entity is charred
 // and can't catch again. Damage is per kind or building type (tuning.js): a full burn takes a house,
-// store, woodpile or field to hp 0, so the village wrecks it; the stone temple comes out scorched but
-// standing. Trees that burn to hp 0 are removed here (brief); villagers and buildings at hp 0 are
+// store or field to hp 0, so the village wrecks it; the stone temple comes out scorched but
+// standing (the stone mine never catches). Trees that burn to hp 0 are removed here (brief); villagers and buildings at hp 0 are
 // left to their owner (village), and their fire dies down at double speed.
 //
 // Spread is bounded so one ignition burns a small cluster, never a whole village:

@@ -72,7 +72,7 @@ section('layout', () => {
         ok(!overlaps(r, L.center), `${tag}: ${name} ${JSON.stringify(r)} clear of the center region ${JSON.stringify(L.center)}`);
       }
       const panels = [L.power, L.align, L.rival, L.creature, L.debug, L.build].filter(Boolean);
-      if (opts.build) ok(L.buildSlots.length === 4 && L.buildSlots.every((r) => contains(L.build, r.x, r.y) && contains(L.build, r.x + r.w - 1, r.y + r.h - 1)), `${tag}: four build slots inside the bar`);
+      if (opts.build) ok(L.buildSlots.length === BUILD_KINDS.length && L.buildSlots.every((r) => contains(L.build, r.x, r.y) && contains(L.build, r.x + r.w - 1, r.y + r.h - 1)), `${tag}: ${BUILD_KINDS.length} build slots inside the bar`);
       for (let i = 0; i < panels.length; i++) for (let j = i + 1; j < panels.length; j++) {
         ok(!overlaps(panels[i], panels[j]), `${tag}: panels ${i} and ${j} do not overlap`);
       }
@@ -267,7 +267,7 @@ section('title flow', () => {
   ok(game.state.uiCapture === true, 'title holds the pointer');
   game.renderer.render();
   ok(ui.last.title && !ui.last.hud, 'title drawn, HUD hidden');
-  const rock = game.world.query({ kind: 'rock' })[0];
+  const rock = game.world.query({ kind: 'rock' }).find((r) => !r.ore); // a press held still on an ore rock draws ore instead
   const v = game.camera.worldToView(rock.x, rock.y, rock.z ?? game.world.heightAt(rock.x, rock.y));
   s.move(v.sx, v.sy - 3);
   run(game, DT);
@@ -417,16 +417,16 @@ section('build bar and placement', () => {
   events.on('building-placed', (p) => placed.push(p));
   game.renderer.render();
   const L = ui.layout();
-  // the bar is drawn with its four kinds and their costs
+  // the bar is drawn with its kinds and their costs
   const bar = ui.last.build;
   ok(bar && bar.slots.map((x) => x.kind).join() === BUILD_KINDS.join() && bar.slots.every((x) => x.cost === KINDS[x.kind].cost), `bar shows ${bar?.slots.map((x) => `${x.kind}:${x.cost}`).join(' ')}`);
-  // keys 1-4 pick, the same key again puts it away
+  // keys 1-3 pick, the same key again puts it away
   s.keyDown('Digit1'); s.keyUp('Digit1');
   ok(ui.build.kind === 'house' && st.uiCapture === true, 'key 1 picks house and the UI holds the pointer');
   s.keyDown('Digit1'); s.keyUp('Digit1');
   ok(ui.build.kind === null, 'key 1 again puts it away');
-  s.keyDown('Numpad4'); s.keyUp('Numpad4');
-  ok(ui.build.kind === 'woodpile', 'numpad 4 picks woodpile');
+  s.keyDown('Numpad3'); s.keyUp('Numpad3');
+  ok(ui.build.kind === 'store', 'numpad 3 picks store');
   // a click on a slot picks that kind
   const slot = L.buildSlots[0];
   s.move(slot.x + 5, slot.y + 5);
@@ -521,7 +521,7 @@ section('build bar and placement', () => {
   ok(ui.build.kind === 'house', 'the kind stays picked for the next plan');
 
   // a rock under the pointer while the bar is open: no grab
-  const rock = world.query({ kind: 'rock' })[0];
+  const rock = world.query({ kind: 'rock' }).find((r) => !r.ore); // a press held still on an ore rock draws ore instead
   camera.centerOn(rock.x, rock.y, rock.z);
   run(game, DT);
   const rv = camera.worldToView(rock.x, rock.y, rock.z);

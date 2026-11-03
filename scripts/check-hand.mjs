@@ -31,7 +31,7 @@ const OX = V0.x - 20, OY = V0.y - 40;
 const { HAND } = await import('../src/systems/hand.js');
 const { stepBody, apexHeight, flatRange, predictLanding } = await import('../src/hand/flight.js');
 const { createStrokeTracker } = await import('../src/hand/stroke.js');
-const { VILLAGE, woodIn } = await import('../src/village/config.js');
+const { VILLAGE, woodIn, oreIn } = await import('../src/village/config.js');
 const { releaseVelocity, groundToScreenVelocity, screenToGroundVelocity, isGrabbable } = await import('../src/hand/tunables.js');
 const { drawTop } = await import('../src/hand/draw.js');
 const { makeLut } = await import('../src/art/lut.js');
@@ -597,10 +597,11 @@ section('game.state.uiCapture blocks new grabs, strokes, slaps and tethers, neve
 });
 
 // The hand in bulk on the real island with both villages set up: draw grain from a field and drop
-// it on the storehouse; draw a standing tree's wood; take wood out of the woodpile, drop some on a
-// blueprint and pour the rest in (god-building at godBuildFactor x the cost); multi pick-up of
-// villagers (stowed, one out per click, the rest poured out) and of trees (dropped on the woodpile
-// at once); never two rocks; shaking empties the hand.
+// it on the store; draw a standing tree's wood; take wood out of the store (its right third), drop
+// some on a blueprint and pour the rest in (god-building at godBuildFactor x the cost); multi
+// pick-up of villagers (stowed, one out per click, the rest poured out) and of trees (dropped on the
+// store at once); never two rocks; shaking empties the hand. Step 3: the store's thirds draw ore,
+// grain and wood; an ore rock drains or goes in whole; a store at its cap takes only what fits.
 section('the hand in bulk', () => {
   const f = setup();
   const { game, world, camera, s, step, sp, middle, moveTo } = f;
@@ -610,14 +611,17 @@ section('the hand in bulk', () => {
   const own = (type) => world.query({ kind: 'building' }).find((b) => b.owner === 'player' && b.type === type && b.stage === 'done');
   const at = (x, y) => { const v = camera.worldToView(x, y, world.heightAt(x, y)); return { sx: v.sx, sy: v.sy }; };
   const over = (b) => at(b.x, b.y);
-  const field = own('field'), store = own('storehouse'), pile = own('woodpile');
+  const field = own('field'), store = own('store'), pile = store;
+  // The store's thirds as the hand reads them (storeKindAt): left ore, middle grain, right wood.
+  const third = (b, k) => { const o = over(b); return { sx: o.sx + 20 * k, sy: o.sy }; };
+  const woodSide = (b) => third(b, 1), oreSide = (b) => third(b, -1);
   camera.centerOn(store.x, store.y, world.heightAt(store.x, store.y));
   step(1 / 30);
   const seen = { shake: [], pour: [] };
   game.events.on('shake', (e) => seen.shake.push(e));
   game.events.on('pour', (e) => seen.pour.push(e));
 
-  // grain: hold on a ripe field, carry to the storehouse, let go
+  // grain: hold on a ripe field, carry to the store, let go
   field.growth = 1;
   // a click on the field takes nothing (drawing starts after drawDelay)
   moveTo(over(field)); s.down(0); s.up(0); step(1 / 30);
@@ -633,10 +637,10 @@ section('the hand in bulk', () => {
   ok(grain && field.growth >= 1 - grain.amount / VILLAGE.fieldYield && field.growth < 1 - grain.amount / VILLAGE.fieldYield + 0.04, `the field's crop falls by what was drawn (growth ${field.growth.toFixed(3)} after ${grain?.amount} drawn)`);
   const g0 = store.grain;
   moveTo(over(store)); step(0.2);
-  ok(H.load?.amount === grain?.amount, 'passing over the storehouse with a field\'s grain takes none out of it');
+  ok(H.load?.amount === grain?.amount, 'passing over the store with a field\'s grain takes none out of it');
   s.up(0); step(1 / 30);
   ok(store.grain === g0 + grain.amount && !H.held.length && !world.query({ kind: 'grain' }).some((e) => e.madeBy === 'hand'),
-    `dropped on the storehouse, the grain goes into stock (${g0} -> ${store.grain})`);
+    `dropped on the store, the grain goes into stock (${g0} -> ${store.grain})`);
 
   // a standing tree held still: its wood drains into the hand and the tree is gone when empty
   const tree = world.query({ kind: 'tree' }).filter((t) => !t.held).sort((a, b) => Math.hypot(a.x - store.x, a.y - store.y) - Math.hypot(b.x - store.x, b.y - store.y))[0];
@@ -649,7 +653,7 @@ section('the hand in bulk', () => {
   ok(f.since(n).some((e) => e.type === 'act' && e.verb === 'uproot'), 'draining a tree uproots it (act)');
   const w0 = pile.wood;
   moveTo(over(pile)); step(0.2); s.up(0); step(1 / 30);
-  ok(pile.wood === w0 + want && !H.held.length, `the wood dropped on the woodpile goes into stock (${w0} -> ${pile.wood})`);
+  ok(pile.wood === w0 + want && !H.held.length, `the wood dropped on the store goes into stock (${w0} -> ${pile.wood})`);
   // a tree pulled up, set down, then drained: one uproot act in all (grab() counts it, the drain not again)
   // a tree with no other within 6 tiles, so the drag below sweeps up no second one
   const alone = (t) => !world.query({ kind: 'tree', x: t.x, y: t.y, r: 6 }).some((o) => o !== t);
@@ -667,7 +671,7 @@ section('the hand in bulk', () => {
   ok(ups === 1, `pulling a tree up and then draining it acts one uproot, not two (${ups})`);
   moveTo(over(pile)); step(0.2); s.up(0); step(1 / 30);
 
-  // the woodpile: take wood out, drop part on a blueprint, pour the rest in
+  // the store's wood: take wood out, drop part on a blueprint, pour the rest in
   pile.wood = 5000;
   const spot = (() => {
     for (let r = 3; r < 9; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
@@ -678,20 +682,25 @@ section('the hand in bulk', () => {
   })();
   const site = world.get(vs.placeBlueprint('house', spot[0], spot[1]));
   const cost = site.woodCost;
-  moveTo(over(pile)); s.down(0);
+  moveTo(woodSide(pile)); s.down(0);
   for (let i = 0; i < 300 && (H.load?.amount ?? 0) < 100; i++) step(1 / 30);
   const taken = H.load?.amount ?? 0;
-  ok(taken >= 100 && pile.wood === 5000 - taken, `holding on the woodpile takes wood out (${taken}, pile ${pile.wood})`);
+  ok(taken >= 100 && pile.wood === 5000 - taken && H.load?.kind === 'wood', `holding on the store's log stack takes wood out (${taken}, store ${pile.wood})`);
   moveTo(over(site)); step(HAND.pourDelay / 2); s.up(0); step(1 / 30);
   ok(site.woodHave === Math.min(cost, taken) && site.stage === 'blueprint' && site.progress === 0, `dropped on a blueprint, the wood pays in at cost (woodHave ${site.woodHave} of ${cost})`);
   const before = { have: site.woodHave, god: vs.stats().player.godWood };
-  moveTo(over(pile)); s.down(0);
+  moveTo(woodSide(pile)); s.down(0);
   for (let i = 0; i < 400 && (H.load?.amount ?? 0) < 2 * cost; i++) step(1 / 30);
   moveTo(over(site));
   step(HAND.pourDelay / 2);
   ok(site.woodHave === before.have && !seen.pour.length, 'passing over a site does not pour (the hand must stay over it)');
   const carried = H.load?.amount ?? 0;
+  // The village's villagers stand still while the hand pours: a builder hauling a load into the site
+  // mid-pour changes what god-building needs (step 3 moved the store; on seed 1 one brought 99 wood).
+  const frozen = world.query({ kind: 'villager' });
+  for (const v of frozen) { v.path = null; v.work = null; v.wait = 60; }
   for (let i = 0; i < 300 && site.stage !== 'done'; i++) step(1 / 30);
+  for (const v of frozen) v.wait = 0;
   const god = vs.stats().player.godWood - before.god;
   const left = H.load?.amount ?? 0;
   ok(site.stage === 'done' && seen.pour.length > 0, `held over the blueprint, the wood pours in and god-builds it (${site.stage})`);
@@ -737,7 +746,11 @@ section('the hand in bulk', () => {
   ok(H.held.length === 1, `a press on two villagers standing on one spot holds one (${H.held.length})`);
   step(0.2); s.up(0); step(1);
 
-  // multi pick-up of trees, let go over the woodpile: all their wood goes in at once
+  // multi pick-up of trees, let go over the store: all their wood goes in at once. Villagers stand
+  // still meanwhile: since step 3 the store also takes the woodcutters' loads, which would land in
+  // the same window.
+  const still = world.query({ kind: 'villager' });
+  for (const v of still) { v.path = null; v.work = null; v.wait = 60; }
   const trees = [0, 1, 2].map((i) => sp('tree', store.x - 3 + i * 0.9, store.y - 3, { sprite: getSprite('test-tree'), species: 'broad', growth: 1, grabbable: true }));
   step(1 / 30);
   const woods = trees.reduce((a, t) => a + woodIn(t), 0);
@@ -747,7 +760,48 @@ section('the hand in bulk', () => {
   for (const t of trees.slice(1)) { moveTo(middle(t)); step(1 / 30); }
   ok(H.held.length === 3 && H.load?.amount === woods, `sweeping across trees holds three with ${woods} wood (${H.held.length}, ${H.load?.amount})`);
   moveTo(over(pile)); step(0.3); s.up(0); step(1 / 30);
-  ok(pile.wood === p0 + woods && trees.every((t) => !world.get(t.id)) && !H.held.length, `trees let go over the woodpile go in together (${p0} -> ${pile.wood}, want +${woods}; left ${trees.filter((t) => world.get(t.id)).length}, held ${H.held.length})`);
+  ok(pile.wood === p0 + woods && trees.every((t) => !world.get(t.id)) && !H.held.length, `trees let go over the store go in together (${p0} -> ${pile.wood}, want +${woods}; left ${trees.filter((t) => world.get(t.id)).length}, held ${H.held.length})`);
+  for (const v of still) v.wait = 0;
+
+  // Step 3. The store's thirds: a press held on the middle draws grain, on the left third ore.
+  // Villagers are made ungrabbable meanwhile, so one standing by the store is not picked instead.
+  for (const v of world.query({ kind: 'villager' })) v.grabbable = false;
+  store.grain = 1000; store.ore = 1000;
+  for (const [pt, kind] of [[over(store), 'grain'], [oreSide(store), 'ore']]) {
+    const before = store[kind];
+    moveTo(pt); s.down(0);
+    for (let i = 0; i < 300 && (H.load?.amount ?? 0) < 100; i++) step(1 / 30);
+    const got = H.load?.amount ?? 0;
+    ok(H.load?.kind === kind && got >= 100 && store[kind] === before - got, `a press held on the store's ${kind === 'ore' ? 'left third' : 'middle'} draws ${kind} (${H.load?.kind} ${got}, store ${before} -> ${store[kind]})`);
+    moveTo(over(store)); step(0.2); s.up(0); step(1 / 30);
+    ok(!H.held.length && store[kind] === before, `dropped back on the store, the ${kind} goes back in (${store[kind]})`);
+  }
+  // An ore rock: a press held still drains its ore; one pulled up and dropped on the store goes in whole.
+  const oreRocks = [0, 1].map((i) => sp('rock', store.x + 3 + i * 3, store.y - 4, { sprite: getSprite('test-sphere', { ramp: 'rock', r: 3 }), size: 2, ore: true, grabbable: true, hp: 1 }));
+  step(1 / 30);
+  const oreA = oreIn(oreRocks[0]);
+  moveTo(middle(oreRocks[0])); s.down(0);
+  for (let i = 0; i < 200 && world.get(oreRocks[0].id); i++) step(1 / 30);
+  ok(!world.get(oreRocks[0].id) && H.load?.kind === 'ore' && H.load.amount === oreA, `a press held still on an ore rock draws its ${oreA} ore and the rock is gone (hand ${H.load?.kind} ${H.load?.amount})`);
+  const o0 = store.ore;
+  moveTo(over(store)); step(0.2); s.up(0); step(1 / 30);
+  ok(store.ore === o0 + oreA && !H.held.length, `the ore dropped on the store goes into stock (${o0} -> ${store.ore})`);
+  const oreB = oreIn(oreRocks[1]), q1 = middle(oreRocks[1]);
+  moveTo(q1); s.down(0); s.move(q1.sx + 4, q1.sy); step(0.2);
+  const lifted = oreRocks[1].held;
+  moveTo(over(store)); step(0.3); s.up(0); step(1 / 30);
+  ok(lifted && !world.get(oreRocks[1].id) && store.ore === o0 + oreA + oreB, `an ore rock picked up and dropped on the store puts its ${oreB} ore in and is gone (lifted ${lifted}, store ${store.ore})`);
+  // A store at its cap takes only what fits; the rest is left as a pile.
+  store.wood = VILLAGE.storeCap - 50;
+  const capPile = sp('wood', store.x + 3, store.y + 3, { amount: 200, grabbable: true, sprite: getSprite('wood') });
+  step(1 / 30);
+  moveTo(middle(capPile)); s.down(0); step(0.1);
+  const gotPile = capPile.held;
+  moveTo(over(store)); step(0.3); s.up(0); step(1 / 30);
+  ok(gotPile && store.wood === VILLAGE.storeCap && world.get(capPile.id) && capPile.amount === 150, `a store 50 short of its cap takes 50 of 200 wood, 150 stay as a pile (store ${store.wood}, pile ${world.get(capPile.id) ? capPile.amount : 'gone'})`);
+  ok(vs.sim.handSink(store, 'wood') === null && vs.sim.handSink(store, 'grain') === 'store', 'a store full of wood takes no more wood, still takes grain');
+  world.remove(capPile.id);
+  store.wood = 5000;
 
   // never rocks: a second rock is not swept up. Villagers are made ungrabbable meanwhile, so one
   // walking past is not picked in front of a rock.

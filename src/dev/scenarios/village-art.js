@@ -117,7 +117,7 @@ export default async function villageArt(t, game) {
   const focus = (x, y) => { camera.centerOn(x, y, world.heightAt(x, y)); t.step(1 / 30); };
 
   const registered = new Set(listSprites());
-  for (const name of ['house', 'field', 'storehouse', 'woodpile', 'temple', 'villager', 'wood', 'grain'])
+  for (const name of ['house', 'field', 'store', 'mine', 'temple', 'villager', 'wood', 'grain', 'ore'])
     t.assert(registered.has(name), `painter registered for "${name}"`);
   contractChecks(t);
 

@@ -25,7 +25,7 @@ export const DEBUG = Object.freeze({ minW: 96, maxW: 156, line: 7 });
 export const DEBUG_TOP = PAD + 8 + 4 * 7 + 3;
 export const BANNER = Object.freeze({ maxW: 236, h: 40 });
 /** Build bar (bottom-right): a header row (label, wood stock), then one slot per building kind. */
-const B = { kinds: 4, slot: { w: 21, h: 22 }, gap: 2, pad: 3, head: 9, icon: { x: 4, y: 2 }, key: { x: 2, y: 2 }, cost: { y: 14 } };
+const B = { kinds: 3, slot: { w: 21, h: 22 }, gap: 2, pad: 3, head: 9, icon: { x: 4, y: 2 }, key: { x: 2, y: 2 }, cost: { y: 14 } };
 export const BUILD = Object.freeze({
   ...B,
   w: B.pad * 2 + B.kinds * B.slot.w + (B.kinds - 1) * B.gap,
