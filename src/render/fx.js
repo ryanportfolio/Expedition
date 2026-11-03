@@ -22,8 +22,13 @@
 // frame and only composites it again over the new view buffer. Options are compared by value, so an
 // option replaced between ticks (fire.js sets `light`) redraws; mutating an option array in place
 // would not, and nothing does.
+//
+// Glow: installGlow() puts a faster Painter.glow on pixelfx, with the same output (src/render/glow.js).
 import { createFrame, clearFrame, createFx } from 'pixelfx';
 import { worldToScreen } from '../world/iso.js';
+import { installGlow } from './glow.js';
+
+installGlow();
 
 /**
  * In-place composite of frame f over the view: out is the view's byte view, bg its Uint32Array over

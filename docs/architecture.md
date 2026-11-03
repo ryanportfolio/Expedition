@@ -116,6 +116,8 @@ Drawing: pixelfx paints an effect into a frame with two buffers, `color` (pixels
 
 pixelfx splits each effect into a back part (behind a character) and a front part. The renderer composites the back part before the sorted sprites and the front part after them. All effects share these two layers; an effect is not sorted between individual sprites.
 
+Two effects run from copies of pixelfx's code that cache work between ticks: the rain cloud (`src/miracles/rain-cloud.js`) and the flames on burning buildings and trees (`src/miracles/flames.js`). The layer also replaces pixelfx's glow with a faster one that writes the same bytes (`src/render/glow.js`). "Performance" below has the details and how they were checked.
+
 ## Input
 
 The input module keeps the pointer position in view pixels (`pointer.sx`, `pointer.sy`), the world point under it (`pointer.x`, `y`, `z`, and `hit`), the button mask (`buttons`: 1 left, 2 right, 4 middle), the drag in progress, and velocity over the last 100 ms in view pixels and in tiles per second. The wheel accumulates until the camera consumes it, and `keys` holds the `KeyboardEvent.code` values currently down.
@@ -227,4 +229,34 @@ The effects layer (`src/render/fx.js`) was 11.5 of the 12.8 ms a frame took befo
 
 Checked with a seeded random comparison (296,000 pixels, every alpha and light case, 0 differences) and a node replay of 400 frames with casts, camera pans and an option changed between ticks, rendered through the old and the new layer: the outputs differ only on the two frames where re-rendering after a cast differs in the old layer too. In the scene of that time (fire on houses first, which left every house a wreck about 10 s into the window), p95 went from 20.1 ms to 10.1 ms and the frames over 16.7 ms from 490 to 0.
 
-The margin is on frames that also run a sim tick: those repaint every effect, and pixelfx painting is most of their 12 ms. Their p95 of 17.3 to 21.5 ms is over a 60 Hz frame, and the effects are most of it. On this 100 Hz display, where a frame lasts 10 ms, the rAF callback that follows such a frame runs late; the check prints those callback gaps too (p95 about 21 to 22 ms here). The rAF timestamps still advance every 10 ms except on the 7 to 60 frames per run that show a 20 ms or longer gap, so p95 holds. A slower CPU would cross 16.7 ms on these frames first.
+That left the frames that also run a sim tick: those repaint every effect, and pixelfx painting was most of their 12 ms. Their p95 of 17.3 to 21.5 ms was over a 60 Hz frame. On this 100 Hz display, where a frame lasts 10 ms, the rAF callback that follows such a frame runs late; the check prints those callback gaps too (p95 about 21 to 22 ms then). The rAF timestamps still advanced every 10 ms except on the 7 to 60 frames per run that showed a 20 ms or longer gap, so p95 held. The next section cut that painting by more than half.
+
+### Effects painting on tick frames
+
+A node bench of the perf scene (the scenario loaded through Vite in node, ticked and rendered 600 times, timing each effect's paint) put the effects' time on a tick frame at 2.1 ms behind the sprites and 8.1 ms in front, close to what the browser showed. Two effects were most of it: the two to three rain clouds, 5.3 ms together, and the twelve or so burning trees, 3.3 ms. Inside the rain cloud, the cloud body took 86%: a field summed from 17 billows over 168 x 70 cells, then about 4,500 pixels shaded with up to four noise lookups each. Glows (radial light) and compositing were most of the rest; compositing a layer over the view costs about 0.5 ms whether or not it was repainted.
+
+Three changes, none of which changes a pixel:
+
+- **Rain cloud body cached per loop frame** (`src/miracles/rain-cloud.js`). The body depends on the loop frame, the seed and the palettes, and on nothing that moves between loops. The file holds storm-cloud's drawing code with the bolt removed (the rain cloud's time mapping never reaches the bolt's frames, so it never drew) and keeps, per cloud, the cells each loop frame paints and their colors. A cached frame goes through the same `p.px()` calls in the same order. A cloud lives 10 s, about four 2.3 s loops, so three ticks in four reuse a frame. The rain, the wisps under the base and the lights are still drawn every tick.
+- **Flame grids shared between flames of the same age** (`src/miracles/flames.js`). Shadow-flames rasterizes its five tongues into a grid of tones that depends on the effect's time alone; the seed option only moves the embers and licks. A fire cast lights several trees on one tick, so their flames share a time from then on. The grid is built once per distinct time (the perf scene has 12 flames and 5 distinct times per tick) and kept for the next flames of that age. `drawBack()` is still pixelfx's own.
+- **A faster glow** (`src/render/glow.js`, installed on pixelfx's `Painter` by `src/render/fx.js`). pixelfx's `glow()` visits every pixel of the square round its centre and drops most of them in `add()`: the corners outside the radius, the rim below `add()`'s 0.004 cut, and anything outside the frame. The replacement runs the same arithmetic in the same order on a smaller box: rows and columns clipped to the frame, and to a radius past which every pixel provably falls under the cut, with a 1 px margin. Every pixel it visits still goes through both original tests.
+
+Byte identity was checked three ways. The node bench hashes the view after every render (1,200 renders, two per tick over 600 ticks) and gave the same hash list as the code before the change; a one-line change to the flame tips planted in the new code changed 80 of the first 400 hashes. A seeded comparison drew 20,000 random glows (radius, strength, fade, light strength, rotation, sub-pixel placement, partly outside the frame, over prefilled light) through both glow functions: 0 differences over 162 million pixels. A third ran the two copied effects against pixelfx's originals for about 9,000 frames with random seeds, placement, mirroring, rotation, fade-out, prefilled frames and up to three instances of the same age: 0 differences; the planted flame change gave 1,451.
+
+Two other changes were measured and dropped. Compositing only each row's painted span saved about 0.09 ms per layer per render, but finding the spans cost about 0.17 ms per layer on every tick frame, and the pixels outside the spans still need their alpha checked. Filling a new cloud's first loop ahead of time, on renders that repaint nothing, cut the front layer's p95 on tick frames by about 1.5 ms, but the tick frames' total work p95 did not move and the median frame got slower, so the code was not worth keeping.
+
+Measured on this machine (100 Hz display, 2026-11-02), seed 1, against `main` with step 2 merged, before and after alternating, three runs each, 600 villagers in the player's town and 120 in the rival's. Every run cast rain 3 times, fire 6, heal 8 and lightning 8 in the window and passed the end-of-window check. Before run 1 failed the budget (p95 20.0 ms, with a 230 ms stall in its window); before runs 2 and 3 passed.
+
+| Runs 1 / 2 / 3 | Before | After |
+|---|---|---|
+| Frame time p95 | 20.0 / 10.2 / 10.1 ms | 10.1 / 10.1 / 10.1 ms |
+| Frames over 16.7 ms | 122 / 11 / 6 | 0 / 0 / 0 |
+| `game.frame` work, median / p95 | 4.9 / 20.8, 3.9 / 16.1, 4.0 / 16.4 ms | 4.0 / 12.0, 4.0 / 11.9, 4.0 / 11.9 ms |
+| Frames that ran a sim tick: work median | 15.3 / 13.8 / 13.7 ms | 9.8 / 9.7 / 9.6 ms |
+| Frames that ran a sim tick: work p95 | 24.2 / 18.4 / 18.3 ms | 13.7 / 13.7 / 13.6 ms |
+| Effects on those frames, back + front (median) | 2.5 + 8.5, 2.3 + 7.6, 2.3 + 7.6 ms | 2.1 + 3.6 in each run |
+| rAF callback gaps p95 | 23.9 / 22.0 / 22.1 ms | 18.0 / 18.0 / 18.1 ms |
+
+The back layer barely moved: its largest parts are the scorched floor, smoke and glow under each flame, the heal ring and the lightning strike, all still drawn by pixelfx. Tick frames still sit near 10 ms at the median, so on this display the callback after one often runs late, while the rAF timestamps kept their 10 ms steps on every frame of the three runs (longest gap 10.3 ms).
+
+Zoomed all the way out (`--window 2880x1620`, a 960 x 540 view, one run each), the scene went from failing the budget (p95 20.0 ms, 117 frames over 16.7 ms) to passing it (p95 10.2 ms, 60 frames over). Work on sim-tick frames there went from median 16.6 / p95 21.2 ms to 13.8 / 19.5 ms, with the effects at 3.1 + 7.8 ms before and 3.0 + 4.3 ms after, so that view still has slow frames.
