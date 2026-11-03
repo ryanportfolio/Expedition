@@ -1316,6 +1316,34 @@ for (const kind of ['wood', 'grain']) for (const seed of [1, 2]) {
   const o0 = vs.stats().player.ore;
   game.clock.run(2 * MIN, game.tick);
   check(!world.get(pile.id) && vs.stats().player.ore === o0 + 250, `with the mine worked out, a 250-ore pile in the village is carried to the store (${world.get(pile.id) ? 'still lying' : 'taken'}, store ${o0} -> ${vs.stats().player.ore})`);
+  // Ore by an outlying store, past workRadius of the village centre but inside the influence, is
+  // brought in too (Codex review, PR #9: only ore within workRadius of the centre was). Stores are
+  // placed outward, each counted as finished, until one stands past workRadius.
+  const vill = vs.sim.village('player');
+  const R = VILLAGE.workRadius + 12;
+  let edge = null;
+  for (let n = 0; n < 6 && !edge; n++) {
+    let far = null;
+    for (let ty = Math.floor(vill.cy) - R; ty <= vill.cy + R; ty++) for (let tx = Math.floor(vill.cx) - R; tx <= vill.cx + R; tx++) {
+      const d = Math.hypot(tx + 0.5 - vill.cx, ty + 0.5 - vill.cy);
+      if ((!far || d > far.d) && vs.validate('store', tx, ty).ok) far = { tx, ty, d };
+    }
+    if (!far) break;
+    const b = world.get(vs.placeBlueprint('store', far.tx, far.ty));
+    b.stage = 'done';
+    if (far.d > VILLAGE.workRadius + 2) edge = b;
+  }
+  let spot = null;
+  for (let dy = -3; dy <= 3 && edge; dy++) for (let dx = -3; dx <= 3; dx++) {
+    const x = Math.floor(edge.x) + dx + 0.5, y = Math.floor(edge.y) + dy + 0.5;
+    const d = Math.hypot(x - vill.cx, y - vill.cy);
+    if (d > VILLAGE.workRadius + 1 && vs.sim.inTown(x, y) && vs.sim.paths.walkable(Math.floor(x), Math.floor(y)) && (!spot || d > spot.d)) spot = { x, y, d };
+  }
+  const outer = spot && world.spawn('ore', { x: spot.x, y: spot.y, z: world.heightAt(spot.x, spot.y), vx: 0, vy: 0, vz: 0, amount: 250, grabbable: true, carriedBy: null, madeBy: 'village' });
+  const o1 = vs.stats().player.ore;
+  if (outer) game.clock.run(3 * MIN, game.tick);
+  check(outer && !world.get(outer.id) && vs.stats().player.ore === o1 + 250,
+    `a 250-ore pile by an outlying store ${spot?.d.toFixed(1) ?? '?'} tiles from the village centre is carried in (${!outer ? 'no outlying spot found' : world.get(outer.id) ? 'still lying' : 'taken'}, store ${o1} -> ${vs.stats().player.ore})`);
 }
 {
   // The store's cap: grain beyond storeCap is not taken in, and with every store full of grain no one

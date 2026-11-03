@@ -681,9 +681,11 @@ export function createVillageSim(game) {
     return n;
   }
 
-  /** Ore lying loose within workRadius of village `vill`'s centre that a villager may take. */
-  const looseOre = (vill) => world.query({ kind: 'ore', x: vill.cx, y: vill.cy, r: T.workRadius })
-    .filter((it) => grounded(it) && !it.carriedBy && paths.walkable(Math.floor(it.x), Math.floor(it.y)));
+  /** Ore lying loose inside village `vill`'s influence that a villager may take. The whole influence,
+   * not workRadius of the centre: a store wreck's salvage at the edge of a grown town is still
+   * brought in. */
+  const looseOre = (vill) => world.query({ kind: 'ore' })
+    .filter((it) => grounded(it) && !it.carriedBy && paths.walkable(Math.floor(it.x), Math.floor(it.y)) && inRange(vill.owner, it.x, it.y));
 
   /** Usable stores of `owner` with room for `kind`. */
   const storesFor = (owner, kind) => own(owner, 'store').filter((b) => usable(b) && storeRoom(b, kind) >= 1);
