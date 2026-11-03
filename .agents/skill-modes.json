@@ -53,6 +53,7 @@
     "wrapup": "native",
     "writing": "native",
     "writing-plans": "native",
-    "gauntlet": "disabled"
+    "gauntlet": "disabled",
+    "wow-animation": "native"
   }
 }
