@@ -1041,10 +1041,12 @@ export function createVillageSim(game) {
    * `has` caches the village-wide answers for one assign() pass. */
   function placeGone(v, vill, has) {
     const any = (key, test) => (has[key] ??= test());
+    // Finished and not wrecked: a fire on the place does not end the job (it burns out or wrecks it).
+    const standing = (b) => live(b) && b.stage === 'done' && b.hp > 0;
     switch (v.job) {
-      case 'farmer': return !any('field', () => own(vill.owner, 'field').some((b) => b.hp > 0 && b.stage === 'done'));
-      case 'miner': return !any('mine', () => own(vill.owner, 'mine').some((b) => usable(b) && b.ore >= 1));
-      case 'breeder': return !any('house', () => own(vill.owner, 'house').some(usable));
+      case 'farmer': return !any('field', () => own(vill.owner, 'field').some(standing));
+      case 'miner': return !any('mine', () => own(vill.owner, 'mine').some((b) => standing(b) && b.ore >= 1));
+      case 'breeder': return !any('house', () => own(vill.owner, 'house').some(standing));
       case 'worshipper': return !any('temple', () => live(vill.temple) && holdsTemple(vill));
       case 'forester': return !any('tree', () => world.query({ kind: 'tree', x: vill.cx, y: vill.cy, r: T.workRadius }).some((t) => !t.held));
       default: return false; // a builder keeps its job between sites

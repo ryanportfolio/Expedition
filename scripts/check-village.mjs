@@ -1574,6 +1574,11 @@ function forestRun(seed) {
   // A job whose place is gone goes back to automatic assignment: a miner by hand at a worked-out mine.
   letGo(thrown, mine.x, mine.y);
   check(thrown.job === 'miner' && thrown.byHand, `a slow drop by the mine makes a miner by hand (${thrown.job}, ${thrown.byHand})`);
+  // A fire on the mine is not the mine gone (Codex review: usable() cleared the job while it burned).
+  mine.burning = 1;
+  game.clock.run(3 * 30, game.tick);
+  check(thrown.job === 'miner' && thrown.byHand, `a hand-set miner keeps the job while the mine burns (${thrown.job}, by hand ${thrown.byHand})`);
+  mine.burning = 0;
   mine.ore = 0;
   game.clock.run(3 * 30, game.tick);
   check(!thrown.byHand, `a hand-set miner goes back to automatic once the mine is worked out (job ${thrown.job}, by hand ${thrown.byHand})`);
