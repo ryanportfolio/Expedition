@@ -174,13 +174,13 @@ The `smoke` scenario loads the test map, places four marker sprites (one mirrore
 
 ## Performance
 
-The budget is a p95 frame time at or under 16.7 ms in the worst-case scene, measured headed on the real GPU in a 1920 x 1080 window at a pixel ratio of 1.
+The budget is a p95 frame time at or under 16.7 ms in the worst-case scene, measured headed on the real GPU at a pixel ratio of 1 in two windows: 1920 x 1080 (zoom 1, a 640 x 360 view) and 2880 x 1620 (the same 960 x 540 view as the camera zoomed all the way out at 1080p, with the most sprites and effect pixels on screen). Both must pass.
 
 ```bash
 node scripts/perf-check.mjs
 ```
 
-The check builds with Vite, serves the build from node and opens headed Chrome off screen and muted through `launchPlacedChrome()`. It first measures the display refresh rate from `requestAnimationFrame` in an empty page, then opens `?scenario=perf` (`src/dev/scenarios/perf.js`). After 5 s of warm-up it records 20 s of frames. The frame time is the gap between consecutive rAF timestamps. Inside the page, a profiler that wraps the game's own entry points splits each `game.frame` into sim ticks and render phases. Numbers go to stdout and to `D:/screenshots/Expedition/<folder>/perf/perf.json`, with a screenshot taken at the end of the window in `perf/perf-check/scene.png`. `--budget <ms>`, `--warmup <s>`, `--seconds <s>`, `--window <W>x<H>`, `--out <dir>` and `--scenario <name>` change the defaults.
+The check builds with Vite, serves the build from node and opens headed Chrome off screen and muted through `launchPlacedChrome()`. It first measures the display refresh rate from `requestAnimationFrame` in an empty page, then, for each window in turn, opens `?scenario=perf` (`src/dev/scenarios/perf.js`) in a page of that size. After 5 s of warm-up it records 20 s of frames. The frame time is the gap between consecutive rAF timestamps. Inside the page, a profiler that wraps the game's own entry points splits each `game.frame` into sim ticks and render phases. Numbers go to stdout and to `D:/screenshots/Expedition/<folder>/perf/<W>x<H>/perf.json`, with a screenshot taken at the end of the window in `perf/<W>x<H>/perf-check/scene.png`; `perf/perf.json` holds the display rate and each window's verdict. A run takes about 80 s. `--budget <ms>`, `--warmup <s>`, `--seconds <s>`, `--window <W>x<H>[,<W>x<H>...]`, `--out <dir>` and `--scenario <name>` change the defaults.
 
 The scene boots like play, then builds a town round each village through the village's own placement rules (`buildTown` in `src/dev/town.js`): 600 villagers in the player's and 120 in the rival's by default, with a house for every three villagers, a field per 15, a storehouse and a woodpile per 100. The player town is 200 houses, 40 fields, 6 storehouses and 6 woodpiles round the temple; every store holds enough that the woodpiles stay above the woodcutters' target and nobody goes hungry. A park with no buildings is kept round the densest wood near the camera, so the fires there stay out of reach of every house. The sim then settles for 30 s, and the camera frames the player temple, the town centre and the creature. `--town <n>` and `--rival <n>` change the town sizes (`?town=<n>&rival=<n>` on the URL). A tick hook keeps 40 house blueprints open in the player town, so about 80 builders keep hauling wood from the woodpiles, and keeps all four miracles alive, each re-cast for free on its own period:
 
@@ -220,7 +220,7 @@ Before step 2 the scene was the 64 x 64 island with 12 villagers. The same engin
 
 None of them changes what the sim does: 2,000 random path requests on the island give the same paths and distances as the old whole-map search, the creature's fields are identical, and a 120 s replay with 480 villagers ends in the same state with the old and the new code. The terrain cache, which took 0.6 s and 20 MB to build for the whole island at load, is now painted in 128 px chunks when the view needs them (a chunk dropped from the set of at least 256 kept is painted again), about 0.5 ms each, with each chunk byte for byte what the whole build holds (`scripts/check-terrain.mjs` compares all 1,200). `scripts/check-render.mjs` renders the town at every zoom step with culling on and off and requires identical pixels.
 
-The gate measures zoom 1, a 640 x 360 view. Zoomed all the way out (scale 2 at 1080p, a 960 x 540 view, measured with `--window 2880x1620`), the scene fails the budget: p95 20.0 ms with 239 frames (13.7%) over 16.7 ms, and work on sim-tick frames at median 17.7, p95 24.2 ms. The same view with no towns passes at p95 10.1 ms, but its sim-tick frames already reach p95 19.2 ms: the effects cost 3.3 + 8.3 ms at that size. The towns add about 3 ms, mostly sort and blit (0.5 to 2.9 ms for about 1,000 sprites). Making the zoomed-out view fit is follow-up work on the effects layer and sprite drawing.
+Until the effects change below, the gate measured zoom 1 only, a 640 x 360 view. Zoomed all the way out (scale 2 at 1080p, a 960 x 540 view, measured with `--window 2880x1620`), the scene fails the budget: p95 20.0 ms with 239 frames (13.7%) over 16.7 ms, and work on sim-tick frames at median 17.7, p95 24.2 ms. The same view with no towns passes at p95 10.1 ms, but its sim-tick frames already reach p95 19.2 ms: the effects cost 3.3 + 8.3 ms at that size. The towns add about 3 ms, mostly sort and blit (0.5 to 2.9 ms for about 1,000 sprites). "Effects painting on tick frames" below brought that view within the budget, and the check now measures it too.
 
 The effects layer (`src/render/fx.js`) was 11.5 of the 12.8 ms a frame took before it was optimized. Two changes, neither of which changes a pixel:
 
@@ -259,4 +259,13 @@ Measured on this machine (100 Hz display, 2026-11-02), seed 1, against `main` wi
 
 The back layer barely moved: its largest parts are the scorched floor, smoke and glow under each flame, the heal ring and the lightning strike, all still drawn by pixelfx. Tick frames still sit near 10 ms at the median, so on this display the callback after one often runs late, while the rAF timestamps kept their 10 ms steps on every frame of the three runs (longest gap 10.3 ms).
 
-Zoomed all the way out (`--window 2880x1620`, a 960 x 540 view, one run each), the scene went from failing the budget (p95 20.0 ms, 117 frames over 16.7 ms) to passing it (p95 10.2 ms, 60 frames over). Work on sim-tick frames there went from median 16.6 / p95 21.2 ms to 13.8 / 19.5 ms, with the effects at 3.1 + 7.8 ms before and 3.0 + 4.3 ms after, so that view still has slow frames.
+Zoomed all the way out (`--window 2880x1620`, a 960 x 540 view), the scene went from failing the budget to passing it, so the check now measures that window as well as zoom 1:
+
+| Zoomed out | Before (1 run) | After (3 runs) |
+|---|---|---|
+| Frame time p95 | 20.0 ms | 10.1 ms each |
+| Frames over 16.7 ms | 117 | 10 / 5 / 8 |
+| Frames that ran a sim tick: work median / p95 | 16.6 / 21.2 ms | 13.0 / 16.8, 12.7 / 16.5, 12.7 / 16.5 ms |
+| Effects on those frames, back + front (median) | 3.1 + 7.8 ms | 2.9 + 3.9 to 4.1 ms |
+
+The margin there is thin: tick frames reach p95 16.5 to 16.8 ms, so a slower CPU would cross 16.7 ms on them first. Of their 12.7 to 13.0 ms median, sort and blit of about 1,000 sprites take 2.9 ms and terrain 1.1 ms, besides the effects. Compositing each effect layer over the larger view costs about 0.9 ms per render whether it was repainted or not. Besides the span composite above, a version that records the spans inside the full composite on tick frames, and clears only the last spans, was measured at this size and dropped: its branch per pixel added about 0.4 ms per layer to every tick frame, more than the 0.15 to 0.2 ms it saved on the renders between ticks.
