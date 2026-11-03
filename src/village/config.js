@@ -20,7 +20,7 @@ export const VILLAGE = {
   harvestTime: 3,
   tendTime: 4,
   buildStep: 2, // seconds of work per build visit before re-checking
-  workRadius: 16, // woodcutters look for trees this far from the village centre
+  workRadius: 16, // foresters look for trees this far from the village centre
   looseItemRadius: 6, // villagers pick up dropped wood or grain this close
   fieldGrowTime: 45, // seconds from 0 to 1 growth, untended, no rain
   tendFactor: 2, // growth multiplier while a farmer works the field
@@ -32,7 +32,7 @@ export const VILLAGE = {
   worshipShare: 0.25, // share of player adults sent to the temple by auto-assignment
   rivalWorshipShare: 0.15, // rival villagers pray too; no god collects it
   builderShare: 0.3, // share of adults that may build while there are sites
-  woodTarget: 1500, // woodcutters taper off once the stores hold this much wood
+  woodTarget: 1500, // foresters taper off once the stores hold this much wood
   haulLoad: 150, // wood a builder carries from a store to its site per trip (no more than the site still needs)
   // One store holds all three resources (step 3 of docs/gameplay-spec.md), up to storeCap of each, so
   // a growing town needs more stores. A store full of one resource takes no more of it.
@@ -50,7 +50,7 @@ export const VILLAGE = {
   // Surface ore rocks: share of the map's rocks that carry ore, and the ore by rock size.
   oreRockShare: 0.3,
   oreRock: { 1: 100, 2: 250, 3: 500 },
-  // Forests regrow (step 3). A woodcutter plants a sapling where it fells a tree; a sapling grows to
+  // Forests regrow (step 3). A forester plants a sapling where it fells a tree; a sapling grows to
   // a full tree in treeGrowTime (rain adds TUNING.rain.growthRate on top). Every spreadInterval the
   // sim tries spreadTries times to seed a sapling 1-2 tiles from a grown tree, on free grass at a
   // forest edge (1 to spreadCrowd trees within 1.6 tiles), no closer than spreadClear to a building,
@@ -63,9 +63,13 @@ export const VILLAGE = {
   spreadClear: 2,
   rainSprout: 0.5,
   assignInterval: 2,
-  dropLockTime: 90, // a hand-dropped villager keeps its new job this long
   dropRadius: 2, // hand drop within this distance of a target reassigns
   birthInterval: { player: 25, rival: 50 },
+  // Breeders (a hand-set job, step 4): each one shortens the time between births by breederBoost
+  // (birthInterval / (1 + breederBoost x breeders)), up to breederMax breeders. Births still need room
+  // in the houses and birthReserve grain.
+  breederBoost: 0.5,
+  breederMax: 4,
   birthCost: 100, // grain per new villager
   birthReserve: 400, // grain kept back before births
   rivalPlanInterval: 120, // rival places a new blueprint at most this often
@@ -110,14 +114,14 @@ export const KINDS = {
 };
 
 /** Wood left in tree t: what the hand has not drawn out yet, else its species' full amount scaled by
- * its growth (whole units, at least 1). Woodcutters, the creature and the hand all take this much. */
+ * its growth (whole units, at least 1). Foresters, the creature and the hand all take this much. */
 export function woodIn(t) {
   if (typeof t.wood === 'number') return t.wood;
   return Math.max(1, Math.round((VILLAGE.treeWood[t.species] ?? VILLAGE.treeWood.broad) * (t.growth ?? 1)));
 }
 
 export const PLACEABLE = ['house', 'field', 'store'];
-export const JOBS = ['farmer', 'woodcutter', 'miner', 'builder', 'worshipper', 'idle'];
+export const JOBS = ['farmer', 'forester', 'miner', 'builder', 'worshipper', 'breeder', 'idle'];
 /** Resources a store holds, each up to VILLAGE.storeCap. */
 export const STOCK_KINDS = ['grain', 'wood', 'ore'];
 

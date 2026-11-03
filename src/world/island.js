@@ -113,7 +113,7 @@ const ROAD = LP([[20, 40], [26, 37], [31, 32], [37, 27], [41, 23], [45, 20]]);
 
 // Forests: density is the tree chance at the centre, falling to 0 at r.
 // pine = share of pines (more pines high up).
-// The villages' woods are town-scale (tile offsets from their village, within the woodcutters'
+// The villages' woods are town-scale (tile offsets from their village, within the foresters'
 // workRadius); the wild forests between them are island-scale.
 const FORESTS = [
   near(VILLAGE, -2, -11, { name: 'Hearthwood', r: 6, density: 0.85, pine: 0.2 }), // behind the player village

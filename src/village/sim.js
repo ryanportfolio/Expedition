@@ -6,13 +6,13 @@
 //
 // Economy (step 3 of docs/gameplay-spec.md): one store kind holds grain, wood and ore, up to
 // storeCap of each; carriers take a load to the nearest usable store with room for it. A prebuilt
-// mine near each village holds a finite amount of ore that miners carry to the store. Woodcutters
+// mine near each village holds a finite amount of ore that miners carry to the store. Foresters
 // plant a sapling where they fell a tree, saplings grow over treeGrowTime (rain speeds them, see
 // src/miracles/effects.js), grown trees seed saplings at forest edges while the island holds fewer
 // trees than it started with, and rain seeds saplings on free grass under the cloud.
 //
 // Recovery (both villages): every building of ours that is wrecked (fire, lightning, anything that
-// takes hp to 0; never the temple or the mine) goes on the village's `lost` list. Woodcutters clear wrecks that
+// takes hp to 0; never the temple or the mine) goes on the village's `lost` list. Foresters clear wrecks that
 // still hold timber before they fell trees, and builders clear them when they have no wood to haul;
 // clearing takes clearTime and salvages salvageShare of the timber (and of a store's grain and ore).
 // Once a lost building's wreck is gone, the village re-places its blueprint on the old footprint, or
@@ -24,7 +24,7 @@
 // number. These blueprints are marked `auto`. A blueprint the village or the player places on a lost
 // building's wreck or within rebuildRadius of its old spot takes the place of one lost building of
 // its type, so nothing is rebuilt twice, and the player may place over a re-placed
-// blueprint that has no wood in it yet (it goes back on the list). Builders and woodcutters work one
+// blueprint that has no wood in it yet (it goes back on the list). Builders and foresters work one
 // focus site at a time (focus()). With no usable store, no one is sent to farm, carried grain
 // is set down and ripe crops wait in the fields. Temples and mines never fall: every hp write on one stops at
 // templeMinHp (stoneHp), so worship resumes once a fire on it is out. An empty blueprint can't burn,
@@ -63,7 +63,7 @@ export function putWood(world, site, it) {
 }
 
 /** Removes tree t from the world and from the map's tree list (so a reloaded view does not bring it
- * back). Shared by woodcutters, the creature's haul and the hand drawing a tree's wood out. */
+ * back). Shared by foresters, the creature's haul and the hand drawing a tree's wood out. */
 export function removeTree(world, t) {
   world.remove(t.id);
   const i = t.src ? world.trees.indexOf(t.src) : -1;
@@ -83,6 +83,7 @@ export function createVillageSim(game) {
   let time = 0;
   let villages = {};
   const air = new Map(); // villager id -> seconds left to wait for `landed`
+  const keepJob = new Set(); // villager ids whose last release (a throw, a shake, the creature's drop) sets no job on landing
   const badUntil = new Map(); // "villager:target" -> time before which that villager skips the target as unreachable
   const bad = (v, id) => badUntil.get(`${v.id}:${id}`) > time;
   let strikes = [];
@@ -261,17 +262,17 @@ export function createVillageSim(game) {
   // blueprint of a lost type claimed the lost entry, and builders took "re-placed first, else the
   // oldest", so wood was spread over 20+ sites and few finished. (2) Wood. At 0 stock builders stood
   // idle (they only hauled from the woodpile, one log a trip); assignment filled worshippers,
-  // builders and farmers before woodcutters, so a 3-villager village could have no woodcutter at
+  // builders and farmers before foresters, so a 3-villager village could have no forester at
   // all; a wreck's timber was salvaged only by an idle builder; and a load delivered to a site was
   // sunk whole even past its cost. (3) Food. A lost storehouse waited behind the woodpile and for its
   // wreck to be cleared (or 120 s), so grain stayed at 0, villagers walked at hungrySpeed for half
   // the run and still went to pray. (4) A dead end: a builder holding wood or salvage with nowhere
   // to take it held it for ever and never built again.
-  // What changed: jobs dealt in tiers, shortages first (farmers at 0 grain, woodcutters before
-  // builders at 0 wood, no worship while starving); builders and woodcutters share one focus site
+  // What changed: jobs dealt in tiers, shortages first (farmers at 0 grain, foresters before
+  // builders at 0 wood, no worship while starving); builders and foresters share one focus site
   // (focus(): a building the village has none of first, in rebuildOrder storehouse, woodpile, field,
   // house; then sites that need only labour; then re-placed lost buildings), builders keep a site until it is done and
-  // fetch their own wood (salvage, else a tree) when the pile is empty; woodcutters clear timbered
+  // fetch their own wood (salvage, else a tree) when the pile is empty; foresters clear timbered
   // wrecks before felling trees; salvage includes stacked wood and stored grain; a lost store is
   // re-placed at once when the village has none; a load with nowhere to go is set down; farmers are
   // re-dealt the tick a field or storehouse finishes. Tunables then (in logs, before the step-1 retune): treeYield 2, salvageShare 0.75,
@@ -423,10 +424,10 @@ export function createVillageSim(game) {
       throw new Error('village.setup: map needs sites.temple, village, rival and rivalTemple');
     mapRef = world.height;
     time = 0;
-    air.clear(); badUntil.clear(); strikes = []; growing.clear(); spreadT = 0; sproutAcc = 0;
+    air.clear(); keepJob.clear(); badUntil.clear(); strikes = []; growing.clear(); spreadT = 0; sproutAcc = 0;
     game.state ??= {};
     game.state.power ??= 0;
-    // Trees become entities (woodcutters fell them) unless another system already made them.
+    // Trees become entities (foresters fell them) unless another system already made them.
     if (!world.query({ kind: 'tree' }).length) {
       for (const t of world.trees) {
         world.spawn('tree', {
@@ -494,7 +495,7 @@ export function createVillageSim(game) {
   function adopt(v, owner) {
     Object.assign(v, {
       owner: v.owner ?? owner ?? nearestOwner(v), job: 'idle', pose: 'idle', frame: 0, facing: 'se',
-      hunger: game.rng.next() * 0.5, lockUntil: 0, path: null, pi: 0, work: null, carry: null,
+      hunger: game.rng.next() * 0.5, byHand: false, path: null, pi: 0, work: null, carry: null,
       target: null, wait: 0, flee: 0, fleeFrom: null, fleeTo: -1, anim: 0, dying: 0, landedAt: -99,
     });
     v.hp ??= 1; v.grabbable ??= true; v.flammable ??= false;
@@ -642,16 +643,18 @@ export function createVillageSim(game) {
 
   // ---- jobs ------------------------------------------------------------------------------------
 
-  function setJob(v, job, target = null, lock = 0) {
+  /** Gives v a job. `byHand`: the hand set it, and it stays until v dies, the job's place is gone
+   * (placeGone) or a shake clears it; automatic assignment never moves v meanwhile. */
+  function setJob(v, job, target = null, byHand = false) {
     v.job = job; v.target = target; v.path = null; v.work = null; v.wait = 0;
-    if (lock) v.lockUntil = time + lock;
+    if (byHand) v.byHand = true;
   }
   const bTile = (b) => tileOf(b);
 
   /** The site to work on next among `list` (all of one village): a building the village has none of
    * standing comes first, in rebuildOrder (no store: the store, whoever placed it); then a
    * site with all its wood in (it needs only labour); then re-placed lost buildings in rebuildOrder;
-   * then the one closest to having its wood; then the oldest. Builders and woodcutters share it, so
+   * then the one closest to having its wood; then the oldest. Builders and foresters share it, so
    * wood and work go to one site at a time instead of being spread thin over every open blueprint.
    * Null for an empty list. */
   function focus(list) {
@@ -728,7 +731,7 @@ export function createVillageSim(game) {
   function chooseTree(v) {
     const vill = villages[v.owner];
     const taken = new Set();
-    for (const o of world.query({ kind: 'villager' })) if (o !== v && o.job === 'woodcutter' && o.target) taken.add(o.target);
+    for (const o of world.query({ kind: 'villager' })) if (o !== v && o.job === 'forester' && o.target) taken.add(o.target);
     const list = world.query({ kind: 'tree', x: vill.cx, y: vill.cy, r: T.workRadius })
       .filter((t) => grounded(t) && !taken.has(t.id) && !(t.burning > 0) && (t.growth ?? 1) >= 0.5 && !bad(v, t.id));
     return nearest(list, v.x, v.y);
@@ -748,7 +751,7 @@ export function createVillageSim(game) {
     if (it && !canTake(v.owner, it.kind)) { dropCarry(v); it = null; }
     const vill = villages[v.owner];
     switch (v.job) {
-      case 'woodcutter': {
+      case 'forester': {
         if (it) return deliver(v, it);
         const loose = canTake(v.owner, 'wood') && looseNear(v, 'wood');
         if (loose) { if (goto(v, tileOf(loose), loose.id)) pickUp(v, loose); return; }
@@ -816,7 +819,7 @@ export function createVillageSim(game) {
           const wp = nearest(own(v.owner, 'store').filter((b) => usable(b) && b.wood > 0), v.x, v.y);
           if (!wp) {
             // No wood in stock: the builder fetches it for its site itself, salvage from a wreck
-            // first, else a tree it fells, instead of standing idle until a woodcutter comes by.
+            // first, else a tree it fells, instead of standing idle until a forester comes by.
             const wreck = chooseWreck(v);
             if (wreck) return clearWreck(v, wreck);
             const tree = chooseTree(v);
@@ -860,6 +863,20 @@ export function createVillageSim(game) {
         if (goto(v, spots[v.id % spots.length], temple.id)) v.work = { t: 2, pose: 'pray' };
         return;
       }
+      case 'breeder': {
+        // A breeder waits beside its house (the one it was dropped on, else the nearest): each one makes
+        // births come sooner (breedInterval), while the houses have room.
+        if (it) return deliver(v, it);
+        let house = v.target && world.get(v.target);
+        if (!house || house.type !== 'house' || house.owner !== v.owner || !usable(house))
+          house = nearest(own(v.owner, 'house').filter((b) => usable(b) && !bad(v, b.id)), v.x, v.y);
+        if (!house) { v.target = null; v.wait = 3; v.pose = 'idle'; return; }
+        v.target = house.id;
+        const door = doorstep(house, v);
+        if (door < 0) { v.wait = 3; v.pose = 'idle'; return; }
+        if (goto(v, door, house.id)) { v.wait = 4; v.pose = 'idle'; }
+        return;
+      }
       default: {
         if (it) return deliver(v, it);
         v.pose = 'idle';
@@ -870,6 +887,20 @@ export function createVillageSim(game) {
         v.wait = 2 + game.rng.next() * 2;
       }
     }
+  }
+
+  /** The walkable tile in the ring one tile outside building b's footprint nearest to v (ties: lower
+   * index), or -1: where a breeder waits at its house, beside it instead of drawn over it. */
+  function doorstep(b, v) {
+    let best = -1, bd = Infinity;
+    for (let y = b.ty - 1; y <= b.ty + b.fh; y++)
+      for (let x = b.tx - 1; x <= b.tx + b.fw; x++) {
+        const ring = x === b.tx - 1 || y === b.ty - 1 || x === b.tx + b.fw || y === b.ty + b.fh;
+        if (!ring || !paths.walkable(x, y)) continue;
+        const d = (x + 0.5 - v.x) ** 2 + (y + 0.5 - v.y) ** 2;
+        if (d < bd) { bd = d; best = tileAt(x, y); }
+      }
+    return best;
   }
 
   /** Walkable tiles in a ring one tile outside the temple footprint (cached per village). */
@@ -892,7 +923,7 @@ export function createVillageSim(game) {
     removeTree(world, tree);
     // The feller replants: a sapling of the same kind where the tree stood (spec: foresters cut and
     // replant). Only villagers do; the creature and the hand leave the ground bare. Not on town land
-    // (inTown), which woodcutters clear for building as before, and not a tree the hand or the
+    // (inTown), which foresters clear for building as before, and not a tree the hand or the
     // creature moved, which has no roots where it lies; the island's tree count regrows at forest
     // edges instead (spread).
     if (!tree.uprooted && !inTown(tree.x, tree.y)) plantSapling(tree.x, tree.y, tree.species);
@@ -980,7 +1011,11 @@ export function createVillageSim(game) {
 
   // ---- hand drop -------------------------------------------------------------------------------
 
-  /** A villager dropped near a temple, site, field, mine or tree takes that job for a while. */
+  /** A villager dropped near a temple, site, field, mine, house or tree takes that job (worshipper,
+   * builder, farmer, miner, breeder, forester); with none of those in reach, next to another adult of
+   * its village standing on the ground, breeder. For the player's villagers the job is set by hand and
+   * stays; a rival villager takes it under the rival's automatic assignment, which may move it again.
+   * Only a slow drop from the hand calls this: a throw, a shake or the creature's drop leaves the job. */
   function dropAssign(v, x, y) {
     if (!v || v.kind !== 'villager' || v.dying || v.job === undefined) return;
     const R = T.dropRadius;
@@ -992,10 +1027,33 @@ export function createVillageSim(game) {
       else if (isSite(b)) consider(rectDist(b, x, y), 'builder', b.id);
       else if (b.type === 'field' && b.stage === 'done') consider(rectDist(b, x, y), 'farmer', b.id);
       else if (b.type === 'mine' && b.ore >= 1) consider(rectDist(b, x, y), 'miner', b.id);
+      else if (b.type === 'house' && b.stage === 'done') consider(rectDist(b, x, y), 'breeder', b.id);
     }
     // Trees stand everywhere, so a tree wins only when it is a tile closer than any building target.
-    for (const t of world.query({ kind: 'tree', x, y, r: R })) if (!t.held) consider(Math.min(R, Math.hypot(t.x - x, t.y - y) + 1), 'woodcutter', t.id);
-    if (best) setJob(v, best.job, best.target, T.dropLockTime);
+    for (const t of world.query({ kind: 'tree', x, y, r: R })) if (!t.held) consider(Math.min(R, Math.hypot(t.x - x, t.y - y) + 1), 'forester', t.id);
+    // Villagers stand by every workplace, and a group put out of the hand lands side by side, so an
+    // adult counts only where no workplace is in reach, and only one standing on the ground.
+    if (!best) for (const o of world.query({ kind: 'villager', x, y, r: R }))
+      if (o !== v && o.owner === v.owner && o.job !== undefined && !o.dying && !o.held && !o.airborne && !air.has(o.id)) consider(Math.hypot(o.x - x, o.y - y), 'breeder', null);
+    if (best) setJob(v, best.job, best.target, v.owner === 'player');
+  }
+
+  /** True when the place of v's hand-set job is gone, so v goes back to automatic assignment: the
+   * village has no field (farmer), no mine with ore (miner), no house (breeder), no temple of its own
+   * (worshipper), or no tree within workRadius (forester).
+   * `has` caches the village-wide answers for one assign() pass. */
+  function placeGone(v, vill, has) {
+    const any = (key, test) => (has[key] ??= test());
+    // Finished and not wrecked: a fire on the place does not end the job (it burns out or wrecks it).
+    const standing = (b) => live(b) && b.stage === 'done' && b.hp > 0;
+    switch (v.job) {
+      case 'farmer': return !any('field', () => own(vill.owner, 'field').some(standing));
+      case 'miner': return !any('mine', () => own(vill.owner, 'mine').some((b) => standing(b) && b.ore >= 1));
+      case 'breeder': return !any('house', () => own(vill.owner, 'house').some(standing));
+      case 'worshipper': return !any('temple', () => live(vill.temple) && holdsTemple(vill));
+      case 'forester': return !any('tree', () => world.query({ kind: 'tree', x: vill.cx, y: vill.cy, r: T.workRadius }).some((t) => !t.held));
+      default: return false; // a builder keeps its job between sites
+    }
   }
 
   // ---- auto-assignment, births, rival growth ---------------------------------------------------
@@ -1026,7 +1084,7 @@ export function createVillageSim(game) {
     const builders = !sites ? 0 : woodRoom ? Math.min(sites * 2, Math.max(1, Math.floor(n * T.builderShare))) : Math.min(sites * 2, n);
     const farmers = store ? Math.min(fields, n) : 0; // no store for grain: the crop waits, hands go to wood
     // Jobs are filled in tier order until every adult has one. Shortages come first: with no grain
-    // in store, farmers; with no wood in stock while sites wait for it, woodcutters before builders
+    // in store, farmers; with no wood in stock while sites wait for it, foresters before builders
     // (builders then only work sites whose wood is in and clear wrecks, which yields salvage wood).
     // Then the usual shares: worship, building, farming, mining, and woodcutting takes everyone left.
     const tiers = [];
@@ -1034,13 +1092,13 @@ export function createVillageSim(game) {
     const starving = grain < T.mealGrain;
     if (starving && farmers) tiers.push(['farmer', Math.min(farmers, Math.max(1, Math.round(n * T.foodShare)))]);
     if (wood === 0 && waiting) {
-      tiers.push(['woodcutter', Math.max(1, Math.round(n * T.gatherShare))]);
+      tiers.push(['forester', Math.max(1, Math.round(n * T.gatherShare))]);
       tiers.push(['builder', Math.min(builders, (open.length - waiting) * 2 + (wrecks ? 1 : 0))]);
     }
     // A starving village sends no one to pray.
     tiers.push(['worshipper', usable(vill.temple) && !starving ? Math.round(n * share) : 0], ['builder', builders], ['farmer', farmers],
-      ['miner', miners], ['woodcutter', !woodRoom ? 0 : wood < T.woodTarget ? n : 1]);
-    const want = { worshipper: 0, builder: 0, farmer: 0, miner: 0, woodcutter: 0 };
+      ['miner', miners], ['forester', !woodRoom ? 0 : wood < T.woodTarget ? n : 1]);
+    const want = { worshipper: 0, builder: 0, farmer: 0, miner: 0, forester: 0 };
     const order = [];
     let left = n;
     for (const [job, k] of tiers) {
@@ -1048,10 +1106,14 @@ export function createVillageSim(game) {
       const give = Math.min(Math.max(0, k - want[job]), left);
       want[job] += give; left -= give;
     }
-    const have = { worshipper: 0, builder: 0, farmer: 0, miner: 0, woodcutter: 0, idle: 0 };
+    const have = { worshipper: 0, builder: 0, farmer: 0, miner: 0, forester: 0, breeder: 0, idle: 0 };
     const free = [];
+    const has = {};
     for (const v of list) {
-      if (v.lockUntil > time) have[v.job] = (have[v.job] ?? 0) + 1;
+      // A hand-set job whose place is gone goes back to automatic assignment (a breeder keeps no job
+      // the tiers deal, so it is dealt a new one below).
+      if (v.byHand && placeGone(v, vill, has)) v.byHand = false;
+      if (v.byHand) have[v.job] = (have[v.job] ?? 0) + 1;
       else free.push(v);
     }
     const pending = [];
@@ -1066,13 +1128,13 @@ export function createVillageSim(game) {
     }
     // Woodcutting takes everyone left over, so it never frees anyone above: when builders are still
     // short (a fire left wrecks and blueprints while every hand was cutting wood), unlocked
-    // woodcutters become builders, the ones already carrying wood first (they bring it along).
+    // foresters become builders, the ones already carrying wood first (they bring it along).
     if (have.builder < want.builder) {
-      const cutters = free.filter((v) => v.job === 'woodcutter').sort((a, b) => (b.carry ? 1 : 0) - (a.carry ? 1 : 0) || a.id - b.id);
+      const cutters = free.filter((v) => v.job === 'forester').sort((a, b) => (b.carry ? 1 : 0) - (a.carry ? 1 : 0) || a.id - b.id);
       for (const v of cutters) {
-        if (have.builder >= want.builder || have.woodcutter <= 1) break;
+        if (have.builder >= want.builder || have.forester <= 1) break;
         setJob(v, 'builder');
-        have.builder++; have.woodcutter--;
+        have.builder++; have.forester--;
       }
     }
   }
@@ -1088,6 +1150,10 @@ export function createVillageSim(game) {
   /** `kind` held in `owner`'s finished stores still standing. */
   const stockOf = (owner, kind) => own(owner, 'store').reduce((s, b) => s + (b.stage === 'done' && b.hp > 0 ? b[kind] : 0), 0);
   const grainOf = (owner) => stockOf(owner, 'grain');
+
+  /** Seconds between births for `owner` with n breeders: birthInterval, shortened by breederBoost a
+   * breeder, up to breederMax of them. Births still need room in the houses and grain. */
+  const breedInterval = (owner, n) => T.birthInterval[owner] / (1 + T.breederBoost * Math.min(n, T.breederMax));
 
   function births(vill, pop) {
     const houses = own(vill.owner, 'house').filter(usable);
@@ -1151,13 +1217,13 @@ export function createVillageSim(game) {
       }
     }
 
-    const pop = { player: 0, rival: 0 };
+    const pop = { player: 0, rival: 0 }, breeders = { player: 0, rival: 0 };
     let praying = 0;
     for (const v of world.query({ kind: 'villager' })) {
       if (v.job === undefined) adopt(v);
       if (v.dying > 0) {
         v.pose = 'dead';
-        if (!v.held) { v.dying -= dt; if (v.dying <= 0) world.remove(v.id); }
+        if (!v.held) { v.dying -= dt; if (v.dying <= 0) { world.remove(v.id); keepJob.delete(v.id); } }
         continue;
       }
       if (v.hp <= 0) {
@@ -1166,12 +1232,12 @@ export function createVillageSim(game) {
         events.emit('villager-died', { id: v.id, cause: deathCause(v) });
         continue;
       }
-      if (pop[v.owner] !== undefined) pop[v.owner]++;
+      if (pop[v.owner] !== undefined) { pop[v.owner]++; if (v.job === 'breeder' && !v.held) breeders[v.owner]++; } // a breeder in the hand is not at home
       v.hunger = Math.min(1, v.hunger + dt / T.eatInterval);
       if (v.hunger >= 1 && takeGrain(v.owner, T.mealGrain)) v.hunger = 0;
       if (v.held || air.has(v.id)) {
         if (v.held) { dropCarry(v); v.path = null; v.work = null; v.pose = 'idle'; }
-        else { const left = air.get(v.id) - dt; if (left <= 0) { air.delete(v.id); dropAssign(v, v.x, v.y); } else air.set(v.id, left); }
+        else { const left = air.get(v.id) - dt; if (left <= 0) { air.delete(v.id); if (!keepJob.has(v.id)) dropAssign(v, v.x, v.y); } else air.set(v.id, left); }
         continue;
       }
       v.anim += dt;
@@ -1192,7 +1258,7 @@ export function createVillageSim(game) {
       vill.assignT += dt;
       if (vill.assignT >= T.assignInterval) { vill.assignT = 0; assign(vill); }
       vill.birthT += dt;
-      if (vill.birthT >= T.birthInterval[owner]) { vill.birthT = 0; births(vill, pop[owner]); }
+      if (vill.birthT >= breedInterval(owner, breeders[owner])) { vill.birthT = 0; births(vill, pop[owner]); }
       settlers(vill, pop[owner], dt);
       vill.rebuildT += dt;
       if (vill.rebuildT >= T.rebuildInterval) { vill.rebuildT = 0; rebuild(vill); }
@@ -1258,11 +1324,19 @@ export function createVillageSim(game) {
     const by = e?.carriedBy != null ? world.get(e.carriedBy) : null;
     if (by?.kind === 'villager') { if (by.carry === e.id) dropCarry(by); e.carriedBy = null; }
   });
+  // Jobs by hand (step 4 of docs/gameplay-spec.md): a slow drop from the hand sets the job of the
+  // place it lands by, for good (dropAssign); a shake clears a hand-set job and hands the villager
+  // back to automatic assignment. A throw or the creature's drop changes nothing. Dropping at the
+  // town centre is the spec's other way to clear one: the temple stands in for the town centre today
+  // and a drop there makes a worshipper, so it waits for the town centre building (step 7).
   events.on('release', (p) => {
     if (!mapRef) return;
     const e = world.get(p?.entityId);
     if (e?.kind !== 'villager') return;
     air.set(e.id, 6);
+    if (p.shaken && e.job !== undefined) e.byHand = false;
+    if (p.thrown || p.shaken || p.by === 'creature') { keepJob.add(e.id); return; }
+    keepJob.delete(e.id);
     dropAssign(e, p.x ?? e.x, p.y ?? e.y);
   });
   events.on('landed', (p) => {
@@ -1272,7 +1346,7 @@ export function createVillageSim(game) {
     air.delete(e.id);
     e.landedAt = time;
     e.path = null;
-    dropAssign(e, e.x, e.y);
+    if (!keepJob.has(e.id)) dropAssign(e, e.x, e.y);
   });
   events.on('rain', (p) => {
     if (!mapRef || !p) return;
@@ -1417,13 +1491,13 @@ export function createVillageSim(game) {
   function stats() {
     const out = { power: game.state?.power ?? 0, time, trees: world.query({ kind: 'tree' }).length, treeCap, growing: growing.size };
     for (const owner of OWNERS) {
-      const jobs = { farmer: 0, woodcutter: 0, miner: 0, builder: 0, worshipper: 0, idle: 0 };
-      let population = 0;
-      for (const v of world.query({ kind: 'villager' })) if (v.owner === owner && v.job !== undefined && !v.dying) { population++; jobs[v.job]++; }
+      const jobs = { farmer: 0, forester: 0, miner: 0, builder: 0, worshipper: 0, breeder: 0, idle: 0 };
+      let population = 0, byHand = 0;
+      for (const v of world.query({ kind: 'villager' })) if (v.owner === owner && v.job !== undefined && !v.dying) { population++; jobs[v.job]++; if (v.byHand) byHand++; }
       const bs = own(owner);
       const vill = villages[owner] ?? {};
       out[owner] = {
-        population, jobs,
+        population, jobs, byHand,
         grain: grainOf(owner), wood: stockOf(owner, 'wood'), ore: stockOf(owner, 'ore'),
         mineOre: bs.reduce((s, b) => s + (b.type === 'mine' ? b.ore : 0), 0),
         woodDelivered: vill.woodDelivered ?? 0, woodSpent: vill.woodSpent ?? 0, grainHarvested: vill.grainHarvested ?? 0,

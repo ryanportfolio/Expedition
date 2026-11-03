@@ -44,7 +44,7 @@ export const CREATURE = {
   // forbids it through the brain as before. A debug candidateFilter sees every candidate.
   harm: { 'eat:villager': 'villager', 'throw:villager': 'villager', 'smash:building': 'building' },
   harmCooldown: { villager: 160, building: 120 },
-  pileHaul: 50, // wood the creature takes from a store per haul (a felled tree yields its woodIn, as a woodcutter's chop)
+  pileHaul: 50, // wood the creature takes from a store per haul (a felled tree yields its woodIn, as a forester's chop)
   gutPerMeal: 1, // poop is offered once the gut holds at least 1
   dungTime: 60, // seconds a dung item fertilizes before it is used up
   dungRadius: 4, // it boosts the nearest field within this many tiles

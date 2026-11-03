@@ -31,7 +31,7 @@ const REQUIRED = ['ink', 'grass', 'dirt', 'sand', 'rock', 'water', 'foliage', 'b
   'cloth-player', 'cloth-rival', 'creature-hide', 'creature-accent', 'hand-glow', 'grain', 'fire', 'heal', 'lightning',
   'ui-parchment', 'ui-ink', 'shadow', 'heart'];
 const MUST_SHIFT = ['grass', 'dirt', 'sand', 'rock', 'water', 'foliage', 'bark', 'thatch', 'stone', 'creature-hide', 'creature-accent', 'hand-glow', 'heart'];
-const MUST_NOT_SHIFT = ['ink', 'skin', 'ui-parchment', 'ui-ink'];
+const MUST_NOT_SHIFT = ['ink', 'skin', 'ui-parchment', 'ui-ink', 'rose'];
 check('ramp count 1..31', RAMPS.length >= 1 && RAMPS.length <= 31 && MAX_RAMPS === 31, `have ${RAMPS.length}`);
 eq('8 shades', SHADES, 8);
 for (const n of REQUIRED) check(`ramp "${n}" present`, n in RAMP);
@@ -308,6 +308,38 @@ check('neutral ramps identical across all 17 alignments', neutralSame);
         check(`painter "${name}" uses valid indices`, sp.data.every((v) => v === 0 || v <= RAMPS.length * 8));
       }
     }
+  }
+  // Step 4: a villager whose job the hand set is outlined in its job's colour, the same colour at
+  // every alignment, and no two jobs share one.
+  {
+    const { JOB_GLOW } = await load('src/art/painters/villagers.js');
+    const evil = makeLut(-1), good = makeLut(1);
+    const seen = new Set();
+    for (const [job, [ramp, shade]] of Object.entries(JOB_GLOW)) {
+      const gi = idx(ramp, shade);
+      const opts = { job, pose: 'walk', frame: 1, facing: 'se', owner: 'player' };
+      const lit = registry.getSprite('villager', { ...opts, glow: true }), plain = registry.getSprite('villager', opts);
+      check(`${job} glow outlines the figure in ${ramp} ${shade}`, lit.data.filter((v) => v === gi).length >= 20 && !plain.data.includes(gi) &&
+        lit.data.every((v, i) => v === plain.data[i] || (v === gi && plain.data[i] === idx('ink', 0))));
+      check(`${job} glow is the same colour good and evil`, evil[gi] === good[gi], `${rgbaOf(evil, gi)} vs ${rgbaOf(good, gi)}`);
+      check(`${job} glow colour is its own`, !seen.has(good[gi]));
+      seen.add(good[gi]);
+    }
+    // Far enough apart to tell at a glance: every two glow colours at least 0.1 apart in OKLab.
+    const lab = (hex) => {
+      const [r, g, b] = hexRGB(hex).map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+      const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+      const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+      const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+      return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+    };
+    const glows = Object.entries(JOB_GLOW).map(([job, [ramp, shade]]) => [job, lab(RAMPS[RAMP[ramp]].good[shade])]);
+    let close = null;
+    for (let i = 0; i < glows.length; i++) for (let j = i + 1; j < glows.length; j++) {
+      const d = Math.hypot(...glows[i][1].map((v, k) => v - glows[j][1][k]));
+      if (!close || d < close.d) close = { d, pair: `${glows[i][0]}/${glows[j][0]}` };
+    }
+    check('job glow colours at least 0.1 apart (OKLab)', close.d >= 0.1, `closest ${close.pair} ${close.d.toFixed(3)}`);
   }
   const fig = registry.getSprite('test-figure');
   check('test figure is about 10 px tall', fig.h >= 9 && fig.h <= 12, `h ${fig.h}`);

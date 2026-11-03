@@ -100,6 +100,9 @@ export const RAMPS = Object.freeze([
   shifting('heart',
     ['#2a0a14', '#46162a', '#65233b', '#86344c', '#a64b5e', '#c06a76', '#d6909a', '#ebbcc0'],
     ['#1a0507', '#2e0d10', '#451619', '#5e2224', '#763331', '#8a4943', '#9c645c', '#b08680']),
+  // Appended (step 4). The breeder's job colour: the heart ramp's good rose, held at every alignment,
+  // so a hand-set breeder's glow reads the same in a good and an evil town.
+  neutral('rose', ['#2a0a14', '#46162a', '#65233b', '#86344c', '#a64b5e', '#c06a76', '#d6909a', '#ebbcc0']),
 ]);
 
 export const SHADES = 8;

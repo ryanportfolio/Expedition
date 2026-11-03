@@ -36,8 +36,10 @@ export function create(game) {
       const same = (e, k) => { if (picked.get(e) === k && e.sprite) return true; picked.set(e, k); return false; };
       for (const e of game.world.entities.values()) {
         if (e.kind === 'villager' && e.job !== undefined) {
-          if (!near(e) || same(e, `${e.job}|${e.pose}|${e.frame}|${e.facing}|${e.owner}`)) continue;
-          e.sprite = getSprite('villager', { job: e.job, pose: e.pose, frame: e.frame, facing: e.facing, owner: e.owner });
+          // glow: a job the hand set shows its colour (step 4).
+          const glow = !!e.byHand;
+          if (!near(e) || same(e, `${e.job}|${e.pose}|${e.frame}|${e.facing}|${e.owner}|${glow}`)) continue;
+          e.sprite = getSprite('villager', { job: e.job, pose: e.pose, frame: e.frame, facing: e.facing, owner: e.owner, glow });
         } else if (e.kind === 'building' && e.madeBy === 'village') {
           if (!near(e)) continue;
           const opts = { owner: e.owner, stage: e.stage };

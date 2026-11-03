@@ -391,7 +391,7 @@ export function create(game) {
         if (vill) vill.woodSpent += n;
         o = world.spawn('wood', { x: entity.x, y: entity.y, z: entity.z + T.carryZ, vx: 0, vy: 0, vz: 0, amount: n, grabbable: true, sprite: getSprite('wood') });
       } else if (o.kind === 'tree') {
-        // fell it: the tree becomes a load of wood, removed the way the village's woodcutters do
+        // fell it: the tree becomes a load of wood, removed the way the village's foresters do
         const n = woodIn(o);
         removeTree(world, o);
         o = world.spawn('wood', { x: entity.x, y: entity.y, z: entity.z + T.carryZ, vx: 0, vy: 0, vz: 0, amount: n, grabbable: true, madeBy: 'creature', sprite: getSprite('wood') });

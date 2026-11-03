@@ -30,7 +30,9 @@
 //   for placing) empties it: everything held
 //   drops where the hand is and an orb is cancelled (it vanishes uncast; its pedestal refills).
 //
-// Events (spec): grab / release { entityId, kind, miracle, x, y, z, vx, vy, vz }, landed { entityId,
+// Events (spec): grab { entityId, kind, miracle, x, y, z, vx, vy, vz }, release (the same, plus
+// thrown and shaken: a villager dropped slowly takes the job of the place it lands by, a shaken one
+// loses a job set by hand; src/village/sim.js), landed { entityId,
 // speed, kind, x, y, z, water }, stroke / slap { creatureId, strength }, tether { creatureId, x, y },
 // act { actor: 'player', verb: 'throw'|'drop'|'uproot', target, weight, x, y }, shake { count, kind },
 // pour { buildingId, amount }. A drawn pile is announced with grab when it first appears.
@@ -238,7 +240,7 @@ export function create(game) {
     setHeld(hand.held.filter((id) => id !== e.id));
     e.held = false;
     launch(e, v.vx, v.vy, v.vz, v.thrown);
-    events.emit('release', { entityId: e.id, kind: e.kind, miracle: e.miracle, x: e.x, y: e.y, z: e.z, vx: v.vx, vy: v.vy, vz: v.vz });
+    events.emit('release', { entityId: e.id, kind: e.kind, miracle: e.miracle, x: e.x, y: e.y, z: e.z, vx: v.vx, vy: v.vy, vz: v.vz, thrown: !!v.thrown, shaken });
     // orbs report their own act when the miracle is cast
     if (e.kind !== 'orb') act(v.thrown ? 'throw' : 'drop', e.kind, v.thrown ? HAND.weights.throw : HAND.weights.drop, e.x, e.y);
     if (v.thrown || shaken || !world.get(e.id)) return;

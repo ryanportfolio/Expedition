@@ -12,7 +12,7 @@
 //                goes into stock, and a press on the store's left third draws ore back out
 //   (shaking the hand empties it)
 // The village's villagers stand still while the hand drops things on the store: since step 3 the
-// store also takes the woodcutters' and farmers' loads, which would land in the same window.
+// store also takes the foresters' and farmers' loads, which would land in the same window.
 // Screenshots: draw-grain, draw-tree, pour, multi, trees, ore.
 import { HAND } from '../../systems/hand.js';
 import { VILLAGE, woodIn, oreIn } from '../../village/config.js';
