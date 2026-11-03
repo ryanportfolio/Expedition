@@ -1316,6 +1316,58 @@ for (const kind of ['wood', 'grain']) for (const seed of [1, 2]) {
   const o0 = vs.stats().player.ore;
   game.clock.run(2 * MIN, game.tick);
   check(!world.get(pile.id) && vs.stats().player.ore === o0 + 250, `with the mine worked out, a 250-ore pile in the village is carried to the store (${world.get(pile.id) ? 'still lying' : 'taken'}, store ${o0} -> ${vs.stats().player.ore})`);
+  // Ore within workRadius of the village centre but outside the influence (beside the mine, which
+  // stands outside it) is brought in as well.
+  const vill = vs.sim.village('player');
+  let byMine = null;
+  for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+    const x = Math.floor(mine.x) + dx + 0.5, y = Math.floor(mine.y) + dy + 0.5;
+    if (!byMine && Math.hypot(x - vill.cx, y - vill.cy) <= VILLAGE.workRadius && !vs.sim.inTown(x, y) && vs.sim.paths.walkable(Math.floor(x), Math.floor(y))) byMine = { x, y };
+  }
+  const minePile = byMine && world.spawn('ore', { x: byMine.x, y: byMine.y, z: world.heightAt(byMine.x, byMine.y), vx: 0, vy: 0, vz: 0, amount: 100, grabbable: true, carriedBy: null, madeBy: 'village' });
+  const oM = vs.stats().player.ore;
+  if (minePile) game.clock.run(2 * MIN, game.tick);
+  check(minePile && !world.get(minePile.id) && vs.stats().player.ore === oM + 100,
+    `a 100-ore pile by the mine, outside the influence, is carried in (${!minePile ? 'no spot found' : world.get(minePile.id) ? 'still lying' : 'taken'}, store ${oM} -> ${vs.stats().player.ore})`);
+  // Ore by an outlying store, past workRadius of the village centre but inside the influence, is
+  // brought in too (Codex review, PR #9: only ore within workRadius of the centre was). Stores are
+  // placed outward, each counted as finished, until one stands more than 2 tiles past workRadius.
+  const R = VILLAGE.workRadius + 12;
+  let edge = null;
+  for (let n = 0; n < 6 && !edge; n++) {
+    let far = null;
+    for (let ty = Math.floor(vill.cy) - R; ty <= vill.cy + R; ty++) for (let tx = Math.floor(vill.cx) - R; tx <= vill.cx + R; tx++) {
+      const d = Math.hypot(tx + 0.5 - vill.cx, ty + 0.5 - vill.cy);
+      if ((!far || d > far.d) && vs.validate('store', tx, ty).ok) far = { tx, ty, d };
+    }
+    if (!far) break;
+    const b = world.get(vs.placeBlueprint('store', far.tx, far.ty));
+    b.stage = 'done';
+    if (far.d > VILLAGE.workRadius + 2) edge = b;
+  }
+  let spot = null;
+  for (let dy = -3; dy <= 3 && edge; dy++) for (let dx = -3; dx <= 3; dx++) {
+    const x = Math.floor(edge.x) + dx + 0.5, y = Math.floor(edge.y) + dy + 0.5;
+    const d = Math.hypot(x - vill.cx, y - vill.cy);
+    if (d > VILLAGE.workRadius + 1 && vs.sim.inTown(x, y) && vs.sim.paths.walkable(Math.floor(x), Math.floor(y)) && (!spot || d > spot.d)) spot = { x, y, d };
+  }
+  const outer = spot && world.spawn('ore', { x: spot.x, y: spot.y, z: world.heightAt(spot.x, spot.y), vx: 0, vy: 0, vz: 0, amount: 250, grabbable: true, carriedBy: null, madeBy: 'village' });
+  const o1 = vs.stats().player.ore;
+  if (outer) game.clock.run(3 * MIN, game.tick);
+  check(outer && !world.get(outer.id) && vs.stats().player.ore === o1 + 250,
+    `a 250-ore pile by an outlying store ${spot?.d.toFixed(1) ?? '?'} tiles from the village centre is carried in (${!outer ? 'no outlying spot found' : world.get(outer.id) ? 'still lying' : 'taken'}, store ${o1} -> ${vs.stats().player.ore})`);
+  // Ore past workRadius and outside the influence stays where it lies: no miner is dealt for it.
+  let beyond = null;
+  for (let dy = -8; dy <= 8 && edge; dy++) for (let dx = -8; dx <= 8; dx++) {
+    const x = Math.floor(edge.x) + dx + 0.5, y = Math.floor(edge.y) + dy + 0.5;
+    const d = Math.hypot(x - edge.x, y - edge.y);
+    if (Math.hypot(x - vill.cx, y - vill.cy) > VILLAGE.workRadius + 1 && !vs.sim.inTown(x, y) && vs.sim.paths.walkable(Math.floor(x), Math.floor(y)) && (!beyond || d < beyond.d)) beyond = { x, y, d };
+  }
+  const away = beyond && world.spawn('ore', { x: beyond.x, y: beyond.y, z: world.heightAt(beyond.x, beyond.y), vx: 0, vy: 0, vz: 0, amount: 250, grabbable: true, carriedBy: null, madeBy: 'village' });
+  let maxMiners = 0;
+  for (let t = 0; away && t < 3 * MIN; t++) { game.tick(1 / 30); maxMiners = Math.max(maxMiners, vs.stats().player.jobs.miner); }
+  check(away && world.get(away.id) && maxMiners === 0,
+    `a 250-ore pile outside the influence and past workRadius stays (${!away ? 'no spot found' : world.get(away.id) ? 'still lying' : 'taken'}, ${beyond?.d.toFixed(1) ?? '?'} tiles from the edge store, at most ${maxMiners} miners)`);
 }
 {
   // The store's cap: grain beyond storeCap is not taken in, and with every store full of grain no one

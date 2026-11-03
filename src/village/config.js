@@ -69,8 +69,8 @@ export const VILLAGE = {
   birthCost: 100, // grain per new villager
   birthReserve: 400, // grain kept back before births
   rivalPlanInterval: 120, // rival places a new blueprint at most this often
-  influenceR: 10, // blueprints within this of the own temple centre
-  buildingInfluenceR: 5, // or within this of a finished own building centre (blueprints do not count)
+  influenceR: 10, // village influence (where blueprints go, and loose ore miners fetch): within this of the own temple centre
+  buildingInfluenceR: 5, // or within this of a finished own building centre (blueprints and the mine do not count)
   dyingTime: 1.5, // seconds a dead villager lies before removal
   // Recovery after fire and other losses (both villages).
   clearTime: 6, // seconds of builder work to clear one wreck away
