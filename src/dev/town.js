@@ -8,10 +8,13 @@ import { KINDS } from '../village/config.js';
 /** Villagers in each town (step 2 of docs/gameplay-spec.md: towns of hundreds). */
 export const TOWN = { player: 600, rival: 120 };
 /** Villagers per building of each kind in a town (houses hold KINDS.house.cap each). */
-const PER = { field: 15, storehouse: 100, woodpile: 100 };
-/** Stock per store in a town: enough that woodpiles stay above VILLAGE.woodTarget all scene (so
- * the woodcutters, one by then, leave the forest the fires need) and nobody goes hungry. */
-const STOCK = { wood: 20000, grain: 10000 };
+const PER = { field: 15, store: 100 };
+/** Stock per store in a town, each under VILLAGE.storeCap so the stores still take loads as they did
+ * before the cap: enough that the wood stays above
+ * VILLAGE.woodTarget all scene (so the woodcutters, one by then, leave the forest the fires need),
+ * nobody goes hungry and the ore is over VILLAGE.oreTarget (no miners: the scene measures the town
+ * as it was, and a mine's few miners are a rounding error next to 600 villagers). */
+const STOCK = { wood: 15000, grain: 10000, ore: 2000 };
 /** House blueprints kept open in the player town, per villager. */
 export const OPEN_PER = 15;
 /** Town reach in tiles from the village centre: room for the town and its open sites, growing with
@@ -34,13 +37,12 @@ function finish(b, k) {
   b.progress = KINDS[b.type].buildTime;
   b.flammable = true;
   if (b.type === 'field') b.growth = (k * 0.618) % 1; // fields at every stage of growth
-  if (b.type === 'woodpile') b.wood = STOCK.wood;
-  if (b.type === 'storehouse') b.grain = STOCK.grain;
+  if (b.type === 'store') Object.assign(b, STOCK);
 }
 
 /**
  * Builds a town of `pop` villagers round `owner`'s village: houses for all of them, and fields,
- * storehouses and woodpiles in the PER ratios. Each building goes through the village's own
+ * stores in the PER ratios. Each building goes through the village's own
  * placement (placeBlueprint: influence, ground, no overlap, no tree or rock in the way) on the
  * nearest free spot with a 1-tile margin round it, outside `keepOut(x, y)`, the kind furthest behind
  * its count first, and is finished at once (finish). Then villagers are spawned in the houses until
@@ -51,9 +53,9 @@ function finish(b, k) {
 export function buildTown(game, owner, pop, keepOut) {
   const { world } = game, sim = game.systems.village.sim;
   const mine = (type) => world.query({ kind: 'building' }).filter((b) => b.owner === owner && b.type === type);
-  const want = { house: Math.ceil(pop / KINDS.house.cap), field: Math.ceil(pop / PER.field), storehouse: Math.ceil(pop / PER.storehouse), woodpile: Math.ceil(pop / PER.woodpile) };
+  const want = { house: Math.ceil(pop / KINDS.house.cap), field: Math.ceil(pop / PER.field), store: Math.ceil(pop / PER.store) };
   const have = Object.fromEntries(Object.keys(want).map((k) => [k, mine(k).length]));
-  for (const t of ['woodpile', 'storehouse']) for (const b of mine(t)) finish(b, 0); // the start stores get the town's stock
+  for (const b of mine('store')) finish(b, 0); // the start store gets the town's stock
   const spots = townSpots(sim.village(owner), townReach(pop));
   let i = 0;
   for (; i < spots.length; i++) {

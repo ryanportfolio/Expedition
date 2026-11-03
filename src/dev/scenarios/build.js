@@ -10,6 +10,7 @@
 // then Esc puts the plan away. The hand must not grab anything during the flow.
 // Works at any window size.
 import { buildTerrainCache, surfaceHeights, PART } from '../../terrain/cache.js';
+import { BUILD_KINDS } from '../../ui/build.js';
 
 export default async function build(t, game) {
   const { world, camera, events, systems } = game;
@@ -24,7 +25,7 @@ export default async function build(t, game) {
   const site = world.sites.village;
   camera.centerOn(site.x, site.y, world.heightAt(site.x, site.y));
   t.step(1);
-  t.assert(U.last.build && U.last.build.slots.length === 4, 'play: the build bar is drawn with four kinds');
+  t.assert(U.last.build && U.last.build.slots.length === BUILD_KINDS.length, `play: the build bar is drawn with its ${BUILD_KINDS.length} kinds`);
 
   // open: a click on the house slot
   const slot = U.layout().buildSlots[0];

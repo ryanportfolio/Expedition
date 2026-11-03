@@ -255,11 +255,12 @@ export function create(game) {
 
   /** Lifts the bar's top (view px) above every building sprite near the temple that its rect would
    * overlap, so the bar never sits on a roof. Sprite rects cover both facings (flipX mirrors about
-   * the anchor column). */
+   * the anchor column). Buildings up to 12 tiles away count: the mine's knoll (step 3) stands about
+   * 10 tiles from the rival centre, and from behind the temple its sprite reaches the bar. */
   function clearOfBuildings(c, cx, top, at) {
     const x0 = Math.round(cx - (BAR_SIZE.w >> 1)), x1 = x0 + BAR_SIZE.w;
     const rects = [];
-    for (const e of world.query({ kind: 'building', x: at.x, y: at.y, r: 6 })) {
+    for (const e of world.query({ kind: 'building', x: at.x, y: at.y, r: 12 })) {
       const s = e.sprite;
       if (!s || !Number.isFinite(s.w)) continue;
       const p = c.toView(e.x, e.y, Number.isFinite(e.z) ? e.z : world.heightAt(e.x, e.y));

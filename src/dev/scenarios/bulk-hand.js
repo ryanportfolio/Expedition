@@ -1,16 +1,21 @@
 // Bulk hand scenario: the real island with both villages set up and screen = 'play'. Drives the hand
 // only through synthetic pointer input and checks the hand in bulk:
 //   draw-grain   holding on a ripe field draws its grain; the hand shows the amount it carries
-//   (grain dropped on the storehouse goes into stock)
+//   (grain dropped on the store goes into stock)
 //   draw-tree    a press held still on a tree draws its wood until the tree is gone
-//   pour         wood taken from the woodpile, held over a house blueprint, pours in and god-builds it
+//   pour         wood taken from the store's log stack (its right third), held over a house
+//                blueprint, pours in and god-builds it
 //   multi        sweeping across villagers holds several; let go, they stay in the hand ("x3")
 //   (one click puts one out; holding the button pours the rest out)
-//   trees        sweeping across trees holds several; let go over the woodpile, their wood goes in
+//   trees        sweeping across trees holds several; let go over the store, their wood goes in
+//   ore          a press held still on an ore rock draws its ore (step 3); dropped on the store it
+//                goes into stock, and a press on the store's left third draws ore back out
 //   (shaking the hand empties it)
-// Screenshots: draw-grain, draw-tree, pour, multi, trees.
+// The village's villagers stand still while the hand drops things on the store: since step 3 the
+// store also takes the woodcutters' and farmers' loads, which would land in the same window.
+// Screenshots: draw-grain, draw-tree, pour, multi, trees, ore.
 import { HAND } from '../../systems/hand.js';
-import { VILLAGE, woodIn } from '../../village/config.js';
+import { VILLAGE, woodIn, oreIn } from '../../village/config.js';
 
 export default async function bulkHand(t, game) {
   const { world, camera, events, input, systems } = game;
@@ -30,14 +35,18 @@ export default async function bulkHand(t, game) {
     const a = { sx: p.sx, sy: p.sy }, n = Math.max(1, Math.round(seconds / game.clock.step));
     for (let i = 1; i <= n; i++) { s.move(Math.round(a.sx + ((q.sx - a.sx) * i) / n), Math.round(a.sy + ((q.sy - a.sy) * i) / n)); tick(); }
   };
-  const field = own('field'), store = own('storehouse'), pile = own('woodpile');
+  const field = own('field'), store = own('store'), pile = store;
+  /** The store's thirds as the hand reads them (storeKindAt): left ore, middle grain, right wood. */
+  const side = (b, k) => { const o = over(b); return { sx: o.sx + 20 * k, sy: o.sy }; };
+  const villageStill = (on) => { for (const v of world.query({ kind: 'villager' })) if (v.owner === 'player' && !v.held) { v.path = null; v.work = null; v.wait = on ? 600 : 0; } };
+  villageStill(true);
   const seen = { shake: 0, pour: 0 };
   events.on('shake', () => seen.shake++);
   events.on('pour', () => seen.pour++);
   camera.centerOn(store.x, store.y, world.heightAt(store.x, store.y));
   t.step(0.5);
 
-  // ---- 1. grain: hold on a ripe field, glide to the storehouse, let go
+  // ---- 1. grain: hold on a ripe field, glide to the store, let go
   field.growth = 1;
   moveTo(over(field));
   s.down(0);
@@ -51,13 +60,13 @@ export default async function bulkHand(t, game) {
   const carried = H.load?.amount ?? 0;
   s.up(0);
   tick();
-  t.assert(store.grain === g0 + carried && !H.held.length, `dropped on the storehouse, ${carried} grain goes into stock (${g0} -> ${store.grain})`);
+  t.assert(store.grain === g0 + carried && !H.held.length, `dropped on the store, ${carried} grain goes into stock (${g0} -> ${store.grain})`);
 
   // ---- 2. a standing tree, the press held still: its wood flows into the hand
   const trees = world.query({ kind: 'tree' }).filter((tr) => !tr.held && Math.hypot(tr.x - store.x, tr.y - store.y) < 9)
     .sort((a, b) => Math.hypot(a.x - store.x, a.y - store.y) - Math.hypot(b.x - store.x, b.y - store.y));
   const tree = trees[0];
-  t.assert(tree, 'a tree stands near the storehouse');
+  t.assert(tree, 'a tree stands near the store');
   const want = woodIn(tree);
   moveTo(middle(tree));
   s.down(0);
@@ -72,9 +81,9 @@ export default async function bulkHand(t, game) {
   const logs = H.load?.amount ?? 0;
   s.up(0);
   tick();
-  t.assert(logs >= want && pile.wood === w0 + logs && !H.held.length, `dropped on the woodpile, the ${logs} wood goes into stock (${w0} -> ${pile.wood})`);
+  t.assert(logs >= want && pile.wood === w0 + logs && !H.held.length, `dropped on the store, the ${logs} wood goes into stock (${w0} -> ${pile.wood})`);
 
-  // ---- 3. woodpile -> blueprint: pour to god-build
+  // ---- 3. store -> blueprint: pour to god-build
   pile.wood = Math.max(pile.wood, 2000);
   let spot = null;
   for (let r = 3; r < 9 && !spot; r++) for (let dy = -r; dy <= r && !spot; dy++) for (let dx = -r; dx <= r && !spot; dx++) {
@@ -83,13 +92,13 @@ export default async function bulkHand(t, game) {
   }
   const siteId = spot ? vs.placeBlueprint('house', spot[0], spot[1]) : null;
   const site = siteId !== null ? world.get(siteId) : null;
-  t.assert(site && site.stage === 'blueprint', `a house blueprint near the storehouse (${spot})`);
+  t.assert(site && site.stage === 'blueprint', `a house blueprint near the store (${spot})`);
   if (site) {
-    moveTo(over(pile));
+    moveTo(side(pile, 1));
     s.down(0);
     for (let i = 0; i < 300 && (H.load?.amount ?? 0) < 1.6 * site.woodCost; i++) tick();
     const taken = H.load?.amount ?? 0;
-    t.assert(taken >= 1.5 * site.woodCost, `holding on the woodpile takes ${taken} wood out`);
+    t.assert(taken >= 1.5 * site.woodCost && H.load?.kind === 'wood', `holding on the store's log stack takes ${taken} wood out`);
     const god0 = vs.stats().player.godWood;
     glide(over(site));
     for (let i = 0; i < 20 && !seen.pour; i++) tick();
@@ -135,10 +144,10 @@ export default async function bulkHand(t, game) {
   t.assert(!H.held.length && group.every((v) => !v.held), 'holding the button pours the rest out');
   t.step(1);
 
-  // ---- 5. multi pick-up of trees, let go over the woodpile
+  // ---- 5. multi pick-up of trees, let go over the store
   const stand = world.query({ kind: 'tree' }).filter((tr) => !tr.held && !tr.uprooted && Math.hypot(tr.x - pile.x, tr.y - pile.y) < 10)
     .sort((a, b) => Math.hypot(a.x - pile.x, a.y - pile.y) - Math.hypot(b.x - pile.x, b.y - pile.y)).slice(0, 3);
-  t.assert(stand.length === 3, `three trees near the woodpile (${stand.length})`);
+  t.assert(stand.length === 3, `three trees near the store (${stand.length})`);
   const woods = stand.reduce((a, tr) => a + woodIn(tr), 0);
   const q0 = middle(stand[0]);
   moveTo(q0);
@@ -156,9 +165,38 @@ export default async function bulkHand(t, game) {
   const p0 = pile.wood;
   s.up(0);
   tick();
-  t.assert(pile.wood === p0 + sweptWood && swept.every((tr) => !world.get(tr.id)) && !H.held.length, `let go over the woodpile, the trees' ${sweptWood} wood goes in (${p0} -> ${pile.wood})`);
+  t.assert(pile.wood === p0 + sweptWood && swept.every((tr) => !world.get(tr.id)) && !H.held.length, `let go over the store, the trees' ${sweptWood} wood goes in (${p0} -> ${pile.wood})`);
 
-  // ---- 6. shake empties the hand
+  // ---- 6. ore: the nearest ore rock, set down beside the store, drained by a press held still
+  const oreRock = world.query({ kind: 'rock' }).filter((r) => r.ore && !r.held).sort((a, b) => Math.hypot(a.x - store.x, a.y - store.y) - Math.hypot(b.x - store.x, b.y - store.y))[0];
+  t.assert(oreRock, 'the island has ore rocks');
+  if (oreRock) {
+    const ox = store.x + 3.5, oy = store.y - 2.5;
+    world.move(oreRock, ox, oy, world.heightAt(ox, oy));
+    tick();
+    const oreWant = oreIn(oreRock);
+    moveTo(middle(oreRock));
+    s.down(0);
+    t.step(HAND.treeDrawDelay + 0.4);
+    t.assert(H.load?.kind === 'ore' && H.load.amount > 0, `a press held still on an ore rock draws its ore (${H.load?.kind} ${H.load?.amount} of ${oreWant})`);
+    await t.shot('ore');
+    for (let i = 0; i < 150 && world.get(oreRock.id); i++) tick();
+    const o0 = store.ore;
+    glide(over(store), 0.4);
+    t.step(0.2);
+    const ore = H.load?.amount ?? 0;
+    s.up(0);
+    tick();
+    t.assert(!world.get(oreRock.id) && ore === oreWant && store.ore === o0 + ore, `the rock drained (${oreWant} ore) and dropped on the store, its ore goes into stock (${o0} -> ${store.ore})`);
+    moveTo(side(store, -1));
+    s.down(0);
+    for (let i = 0; i < 120 && (H.load?.amount ?? 0) < 50; i++) tick();
+    t.assert(H.load?.kind === 'ore' && store.ore < o0 + ore, `a press on the store's left third draws ore back out (${H.load?.kind} ${H.load?.amount})`);
+    moveTo(over(store)); t.step(0.2); s.up(0); tick();
+  }
+  villageStill(false);
+
+  // ---- 7. shake empties the hand
   field.growth = 1;
   moveTo(over(field));
   s.down(0);

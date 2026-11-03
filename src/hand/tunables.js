@@ -50,15 +50,15 @@ export const HAND = {
   slapPose: 0.3,
   strokePose: 0.4,
 
-  // ---- the hand in bulk (resources in units: wood and grain, at the village's scale)
+  // ---- the hand in bulk (resources in units: wood, grain and ore, at the village's scale)
   multiPickup: true, // sweeping across villagers or trees with the button down holds several (an upgrade once tribute exists)
   multiKinds: ['villager', 'tree'], // never rocks, orbs or piles
   multiMax: 40,
   sweepStart: 8, // view px the pointer must move from the press before the sweep adds anything
   spread: [[0, 0], [0.35, -0.2], [-0.3, 0.25], [0.2, 0.4], [-0.4, -0.3]], // tiles: where the first held things ride round the grip; the rest ride on the first
-  treeDrawDelay: 0.3, // s: a press held still this long on a tree draws its wood out instead of pulling the tree up
+  treeDrawDelay: 0.3, // s: a press held still this long on a tree or an ore rock draws its wood or ore out instead of picking it up
   drawDelay: 0.2, // s: a press on a field or store draws nothing before this (a click takes nothing)
-  draw: { start: 40, ramp: 2, max: 800 }, // units/s drawn from a field, store or tree: start x (1 + ramp x seconds drawing), capped
+  draw: { start: 40, ramp: 2, max: 800 }, // units/s drawn from a field, store, tree or ore rock: start x (1 + ramp x seconds drawing), capped
   pour: { start: 60, ramp: 2, max: 900 }, // wood/s poured into a site to god-build it, same shape
   pourDelay: 0.3, // s the hand stays over a site with wood (or holds the button over a held group) before pouring starts
   pourInterval: 0.15, // s between things put out of a held group while the button is held
@@ -79,10 +79,10 @@ export function bulkRate(r, t) {
 }
 
 /** Kinds of loose resource the hand carries as one pile with an amount. */
-export const PILE_KINDS = new Set(['wood', 'grain']);
+export const PILE_KINDS = new Set(['wood', 'grain', 'ore']);
 
 /** Kinds the hand may pick up when the owner of the kind has not set `grabbable`. */
-export const GRABBABLE_KINDS = new Set(['villager', 'tree', 'rock', 'wood', 'grain', 'orb']);
+export const GRABBABLE_KINDS = new Set(['villager', 'tree', 'rock', 'wood', 'grain', 'ore', 'orb']);
 
 /** Creatures and buildings are never grabbable; otherwise the entity's own flag, else the kind default. */
 export function isGrabbable(e) {

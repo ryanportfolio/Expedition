@@ -17,10 +17,14 @@
 // so a rock carried off no longer blocks or shows up at its map spot. Before round 39 they read the
 // records as well, which kept refusing a moved rock's old tile and offered the creature a second,
 // phantom rock there.
+// Ore rocks (step 3 of docs/gameplay-spec.md): about VILLAGE.oreRockShare of the map's rocks are
+// spawned with `ore: true`, picked by a hash of their position so every run marks the same ones.
+// The hand draws their ore (oreIn in src/village/config.js) or drops them on a store.
 // update(dt) runs on sim ticks and never touches the DOM, canvas or window.
 import { buildIsland } from '../world/island.js';
 import { getSprite } from '../art/registry.js';
 import { makeLut } from '../art/lut.js';
+import { VILLAGE } from '../village/config.js';
 import { createTerrainChunks } from '../terrain/cache.js';
 import { drawTerrain, prefetchTerrain } from '../terrain/pass.js';
 
@@ -35,6 +39,13 @@ export function hasMap(world) {
 // the array, so world.js needs no extra field; a WeakSet lets old maps' lists be collected.
 const handled = new WeakSet();
 
+/** True for a map rock at (x, y) that carries ore: a position hash under VILLAGE.oreRockShare. */
+export function isOreRock(x, y) {
+  let h = Math.imul(Math.round(x * 16) | 0, 0x27d4eb2d) ^ Math.imul(Math.round(y * 16) | 0, 0x165667b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  return ((h ^ (h >>> 13)) >>> 0) / 4294967296 < VILLAGE.oreRockShare;
+}
+
 /** One rock entity per map rock, once per map, and none when rock entities already exist. Returns
  * the number spawned. Once run for a map it spawns nothing again on it, even after every rock is gone
  * (rocks destroyed or carried off are never respawned). */
@@ -43,9 +54,10 @@ export function spawnRocks(world) {
   handled.add(world.rocks);
   if (world.query({ kind: 'rock' }).length) return 0;
   for (const r of world.rocks) {
+    const ore = isOreRock(r.x, r.y);
     world.spawn('rock', {
-      x: r.x, y: r.y, vx: 0, vy: 0, vz: 0, size: r.size, grabbable: true, hp: 1,
-      sprite: getSprite('rock', { size: r.size }),
+      x: r.x, y: r.y, vx: 0, vy: 0, vz: 0, size: r.size, grabbable: true, hp: 1, ore,
+      sprite: getSprite('rock', { size: r.size, ore }),
     });
   }
   return world.rocks.length;

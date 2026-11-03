@@ -2,7 +2,7 @@
 // world around it, offers the brain verb:target candidates, walks to the chosen target and acts on
 // the world (eat, throw, smash, haul, water, play, sleep, poop, idle, wander). haul:wood picks up
 // loose wood or fells a tree and carries it to a player blueprint that needs wood, else a player
-// woodpile (wood, woodDelivered); with a blueprint it may also take wood from a player woodpile,
+// store with room for it (wood, woodDelivered); with a blueprint it may also take wood from a player store,
 // so hauling shows up in free play without a blueprint. The destination is checked again when the
 // load goes in (it may be gone or full by then: the load is set down), and a blueprint takes only
 // the wood it still needs (putWood, shared with the village's builders). Stroke and slap
@@ -33,7 +33,7 @@ import { removeTree } from '../village/sim.js';
 import { stepBody } from '../hand/flight.js';
 import { HAND } from '../hand/tunables.js';
 import { VILLAGE } from '../village/config.js';
-import { putWood } from '../village/sim.js';
+import { putWood, storeRoom } from '../village/sim.js';
 import { getSprite } from '../art/registry.js';
 import { makeLut } from '../art/lut.js';
 import '../creature/placeholder-art.js'; // creature and dung stand-ins until the painter lands
@@ -176,18 +176,18 @@ export function create(game) {
 
   const usableBuilding = (b) => b.hp > 0 && b.stage !== 'wrecked';
   const free = (o) => !o.held && !o.airborne && !o.sinking && !o.carriedBy && !flights.has(o.id);
-  const playerPile = (b) => b.type === 'woodpile' && b.owner === 'player' && b.stage === 'done' && usableBuilding(b);
+  const playerPile = (b) => b.type === 'store' && b.owner === 'player' && b.stage === 'done' && usableBuilding(b);
   const needsWood = (b) => b.stage === 'blueprint' && usableBuilding(b) && b.owner === 'player' && (b.woodHave ?? 0) < (b.woodCost ?? 0);
-  // While tethered, hauled wood only goes to a site or woodpile by the tether point, so a haul never
+  // While tethered, hauled wood only goes to a site or store by the tether point, so a haul never
   // walks it away from where the player sent it.
   const byTether = (b) => !tether || Math.hypot(b.x - tether.x, b.y - tether.y) <= T.tetherRadius + T.reach;
-  /** Where hauled wood can go: player blueprints that need wood, and player woodpiles. */
+  /** Where hauled wood can go: player blueprints that need wood, and player stores with room for it. */
   function haulDests() {
     const all = world.query({ kind: 'building' }).filter(byTether);
-    return { sites: all.filter(needsWood), piles: all.filter(playerPile) };
+    return { sites: all.filter(needsWood), piles: all.filter((b) => playerPile(b) && storeRoom(b, 'wood') >= 1) };
   }
   /** Where a load picked up from `fromId` goes: the nearest reachable site that needs wood, else the
-   * nearest other woodpile. { b, g } with the path goal, or null. */
+   * nearest other store. { b, g } with the path goal, or null. */
   function haulDest(f, fromId) {
     const { sites, piles: all } = haulDests();
     const piles = all.filter((b) => b.id !== fromId);
@@ -211,7 +211,7 @@ export function create(game) {
     };
     const ent = (e) => ({ id: e.id, kind: e.kind, x: e.x, y: e.y });
     const near = (kind) => world.query({ kind, x: cx, y: cy, r: R });
-    const food = (b) => usableBuilding(b) && b.stage === 'done' && ((b.type === 'storehouse' && b.grain >= 1) || (b.type === 'field' && b.growth >= 1));
+    const food = (b) => usableBuilding(b) && b.stage === 'done' && ((b.type === 'store' && b.grain >= 1) || (b.type === 'field' && b.growth >= 1));
     let blueprint = false;
     for (const b of near('building')) {
       if (!usableBuilding(b)) continue;
@@ -239,7 +239,7 @@ export function create(game) {
       // spawned a second rock entity and cut the record out of the map's list.
       for (const r of near('rock')) if (free(r)) add('throw:rock', ent(r));
     }
-    // haul:wood: loose wood or a tree to fell, whenever a player blueprint or woodpile can take it
+    // haul:wood: loose wood or a tree to fell, whenever a player blueprint or store can take it
     const dests = haulDests();
     if (dests.sites.length || dests.piles.length) {
       for (const w of near('wood')) if (free(w)) add('haul:wood', ent(w));
@@ -426,12 +426,12 @@ export function create(game) {
     const o = verb === 'haul' || act.holdId != null ? (act.holdId != null ? world.get(act.holdId) : null) : targetObj();
     switch (verb) {
       case 'eat': {
-        const field = o?.kind === 'villager' ? 'hp' : o?.type === 'storehouse' ? 'grain' : 'growth';
+        const field = o?.kind === 'villager' ? 'hp' : o?.type === 'store' ? 'grain' : 'growth';
         const before = o?.[field];
         if (o?.kind === 'villager') {
           letGo(true);
           o.hp = 0;
-        } else if (o?.type === 'storehouse' && o.grain >= 1) {
+        } else if (o?.type === 'store' && o.grain >= 1) {
           o.grain -= Math.min(o.grain, T.grainBite);
         } else if (o?.type === 'field' && o.growth >= 1) {
           o.growth = 0;
@@ -460,7 +460,7 @@ export function create(game) {
         { const before = o.growth; o.growth = Math.min(1, o.growth + T.waterGrowth); return complete(undefined, { id: o.id, field: 'growth', before, after: o.growth }); }
       case 'haul': {
         if (act.stage === 0) {
-          // picked up: carry it to a blueprint that needs wood, else a woodpile
+          // picked up: carry it to a blueprint that needs wood, else a store
           const f = paths.field(tileOf(entity));
           const dest = haulDest(f, act.c.target.id);
           if (!dest) return abort('no-dest');
@@ -475,7 +475,7 @@ export function create(game) {
         // by builders or turned into a site under construction. So the destination is looked up and
         // validated again here, by the same rules that chose it (needsWood / playerPile). Before
         // round 39 a vanished destination left d undefined and needsWood(d) threw, which stopped the
-        // game loop; a wrecked woodpile still took the load.
+        // game loop; a wrecked store still took the load.
         const d = world.get(act.dest);
         const item = letGo(false);
         if (!item) return abort('lost-load');
@@ -489,12 +489,15 @@ export function create(game) {
           if (live(item)) setDown();
           return complete(undefined, { id: d.id, field: 'woodHave', before, after: d.woodHave });
         }
-        if (d && playerPile(d)) {
-          const amount = item.amount ?? 1, before = d.wood;
+        if (d && playerPile(d) && storeRoom(d, 'wood') >= 1) {
+          // a store takes what it has room for (VILLAGE.storeCap); the rest is set down
+          const amount = Math.min(item.amount ?? 1, storeRoom(d, 'wood')), before = d.wood;
           d.wood += amount;
           const vill = game.systems.village?.sim?.village?.(d.owner);
           if (vill) vill.woodDelivered += amount;
-          world.remove(item.id);
+          item.amount = (item.amount ?? 1) - amount;
+          if (item.amount <= 0) world.remove(item.id);
+          else setDown();
           return complete(undefined, { id: d.id, field: 'wood', before, after: d.wood });
         }
         // gone, or no longer takes wood (full, under construction, wrecked): set the whole load down

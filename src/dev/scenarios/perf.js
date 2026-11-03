@@ -20,7 +20,7 @@
 //   villager that none can walk into the kill radius before the bolt lands.
 // A tick hook re-casts each miracle on its own sim-time period, so all four stay alive for as long as
 // the scene runs, and keeps OPEN_SITES house blueprints open in the player town, so its builders
-// keep hauling from the woodpiles to sites (a finished site is replaced at the next free spot). Last, it hands the game to the real-time rAF loop (game.start(), the same loop
+// keep hauling from the stores to sites (a finished site is replaced at the next free spot). Last, it hands the game to the real-time rAF loop (game.start(), the same loop
 // main.js runs) and sets window.__perf.ready.
 //
 // The page-side profiler (window.__perf) wraps the game's own entry points (game.frame, game.tick,

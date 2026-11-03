@@ -9,7 +9,8 @@
 // so a 1 px handle stays 1 px.
 //
 // Jobs read at a glance by tool and dress: farmer = straw hat + hoe, woodcutter = rolled sleeves
-// + axe, builder = leather apron + mallet, worshipper = pale hood and long robe, idle = plain.
+// + axe, miner = dark cap + pick, builder = leather apron + mallet, worshipper = pale hood and long
+// robe, idle = plain.
 // Cloth uses `cloth-player` or `cloth-rival` (owner); everything else uses ramps that do not
 // shift with alignment except the player's cloth, so the rival never changes with the player.
 //
@@ -19,7 +20,7 @@
 import { idx } from '../palette.js';
 import { createSprite, line, mirror, outline, px, trim } from '../sprite.js';
 
-const JOBS = ['farmer', 'woodcutter', 'builder', 'worshipper', 'idle'];
+const JOBS = ['farmer', 'woodcutter', 'miner', 'builder', 'worshipper', 'idle'];
 const POSES = ['idle', 'walk', 'work', 'carry', 'pray', 'flee', 'dead'];
 const FACINGS = ['se', 'sw', 'ne', 'nw'];
 
@@ -79,6 +80,7 @@ function walkFrame(f) {
 const HOLD = {
   farmer: { idle: { front: [6, 5], grip: [6, 5], angle: 90, len: 9 }, walk: { front: [7, 4], grip: [7, 4], angle: 80, len: 9 } },
   woodcutter: { idle: { front: [6, 5], grip: [6, 5], angle: -75, len: 4 }, walk: { front: [6, 5], grip: [6, 5], angle: -65, len: 4 } },
+  miner: { idle: { front: [6, 5], grip: [6, 5], angle: -80, len: 5 }, walk: { front: [6, 4], grip: [6, 4], angle: 120, len: 5 } },
   builder: { idle: { front: [7, 3], grip: [7, 3], angle: 105, len: 4 }, walk: { front: [7, 3], grip: [7, 3], angle: 115, len: 4 } },
 };
 
@@ -102,6 +104,7 @@ const SWING = {
 const TOOL = {
   farmer: { kind: 'hoe', swing: 'hoe', len: 8 },
   woodcutter: { kind: 'axe', swing: 'chop', len: 6 },
+  miner: { kind: 'pick', swing: 'chop', len: 5 },
   builder: { kind: 'mallet', swing: 'chop', len: 4 },
 };
 
@@ -145,7 +148,7 @@ function frameSpec(job, pose, f) {
 // ---- colors ----------------------------------------------------------------------------------
 
 const HAIR = {
-  farmer: ['ui-ink', 2], woodcutter: ['ink', 1], builder: ['skin', 1], worshipper: ['ui-ink', 2], idle: ['ui-ink', 3],
+  farmer: ['ui-ink', 2], woodcutter: ['ink', 1], miner: ['ink', 2], builder: ['skin', 1], worshipper: ['ui-ink', 2], idle: ['ui-ink', 3],
 };
 
 function palette(job, owner) {
@@ -161,6 +164,7 @@ function palette(job, owner) {
     handBack: idx('skin', 3), handFront: idx('skin', 5),
     // dress
     hat: idx('thatch', 6), hatS: idx('thatch', 4), hatD: idx('thatch', 3),
+    cap: idx('ui-ink', 2), capS: idx('ui-ink', 1),
     hood: idx('ui-parchment', 6), hoodS: idx('ui-parchment', 4),
     robe: idx(cloth, 3), robeS: idx(cloth, 2),
     apron: idx('ui-parchment', 3), apronS: idx('ui-parchment', 2),
@@ -226,6 +230,10 @@ function dress(job, fig) {
       }
     }
     for (const [y, [x0, x1]] of legRows) for (let x = x0 + 1; x < x1; x++) body.push([x, y, 'robe']);
+  } else if (job === 'miner') {
+    // Close dark cap pulled over the hair, a peak over the brow on the facing side.
+    for (let x = 3; x <= 5; x++) body.push([x + lean, headTop, x === 5 ? 'capS' : 'cap']);
+    body.push([6 + lean, headTop + 1, 'capS']);
   } else if (job === 'builder') {
     // Leather apron down the front of the tunic.
     body.push([4, 4 + dy, 'apron'], [4, 5 + dy, 'apron'], [5, 5 + dy, 'apronS'], [4, 6 + dy, 'apron'], [5, 6 + dy, 'apronS']);
@@ -259,6 +267,13 @@ function drawTool(s, tool, ox, oy, dy, c) {
     const hx = Math.round(ex - dx), hy = Math.round(ey - dyv);
     px(s, hx + sx, hy + sy, c.iron);
     px(s, hx + 2 * sx, hy + 2 * sy, c.ironHi);
+  } else if (tool.kind === 'pick') {
+    // Pick: a curved iron head across the handle end, a point on each side.
+    px(s, ex, ey, c.ironS);
+    px(s, ex + sx, ey + sy, c.iron);
+    px(s, ex + 2 * sx, ey + 2 * sy, c.ironHi);
+    px(s, ex - sx, ey - sy, c.iron);
+    px(s, Math.round(ex - 2 * sx - dx), Math.round(ey - 2 * sy - dyv), c.ironS);
   } else if (tool.kind === 'hoe') {
     px(s, ex, ey, c.ironS);
     px(s, ex + sx, ey + sy, c.iron);

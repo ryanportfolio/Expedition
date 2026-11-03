@@ -15,3 +15,7 @@
 ## Checks and scenarios that name island tiles (2026-11-02)
 
 Island coordinates written as numbers (`20.5, 40.5`, "the sea is 5 tiles west") broke when the island grew to 192 x 192 (`SCALE` in `src/world/island.js`). Write spots as offsets from `world.sites.*`, and find the sea, a shore or a clearing by searching the map (see the shore search in `scripts/check-hand.mjs`), never by distance from the village. Cost: 7 browser scenarios and 4 node checks to fix in step 2.
+
+## Village layout or random-draw changes move fixed-seed checks (2026-11-02)
+
+Any change to the start layout (`START_LAYOUT`), building kinds or what draws from `game.rng` (step 3: one store, the mine, forest spread) shifts every seeded run. Checks with one-seed thresholds then fail on dice, not on a regression: `check-creature` training counts, the `check-village` recovery sweep, `check-hand` exact store deltas (a woodcutter or builder delivers in the same window), `check-miracles` fire on the village centre. Before changing a check, compare against `origin/main` over several seeds (reference worktree under `C:\Users\Home\CoreWise\_wt\Expedition\`, `node_modules` junctioned). Fix by isolating the test (freeze villagers with `wait`, keep a store stocked) or by aggregating over the seeds the file already uses, and say so in the handover. Cost several reruns in step 3.

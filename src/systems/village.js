@@ -41,6 +41,7 @@ export function create(game) {
         } else if (e.kind === 'building' && e.madeBy === 'village') {
           if (!near(e)) continue;
           const opts = { owner: e.owner, stage: e.stage };
+          if (e.type === 'mine') opts.empty = !(e.ore >= 1); // a worked-out mine is boarded up
           if (e.type === 'field') {
             opts.growth = Math.floor(e.growth * 4) / 4;
             // A field is a flat footprint, not an upright sprite: sort it by its back corner so the
@@ -48,10 +49,17 @@ export function create(game) {
             // under the corner, so a villager standing exactly on it still draws on top.
             e.sortDepth = e.tx + e.ty - 1e-3;
           }
-          if (same(e, `${e.type}|${opts.owner}|${opts.stage}|${opts.growth}`)) continue;
+          if (same(e, `${e.type}|${opts.owner}|${opts.stage}|${opts.growth}|${opts.empty}`)) continue;
           e.sprite = getSprite(e.type, opts);
+        } else if (e.kind === 'tree' && e.madeBy === 'village') {
+          // Saplings grow (step 3): the sprite follows the growth stage the painter draws (quarters).
+          // A plain number compare first: the island holds over a thousand trees, nearly all grown.
+          const g = Math.floor((e.growth ?? 1) * 4) / 4;
+          if ((e.sprite && e.spriteGrowth === g) || !near(e)) continue;
+          e.spriteGrowth = g;
+          e.sprite = getSprite('tree', { species: e.species, growth: g });
         } else if (e.madeBy === 'village' && !e.sprite) {
-          e.sprite = e.kind === 'tree' ? getSprite('tree', { species: e.species }) : getSprite(e.kind);
+          e.sprite = getSprite(e.kind);
         }
       }
     },

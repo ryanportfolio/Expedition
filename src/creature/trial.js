@@ -124,8 +124,8 @@ export async function creatureTrial(game, h) {
     {
       const { effect: x } = force('eat:grain', 90);
       const b = x && B(x.id);
-      const ok = x && b?.kind === 'building' && ((b.type === 'storehouse' && x.field === 'grain') || (b.type === 'field' && x.field === 'growth' && x.before >= 1)) && x.after < x.before;
-      h.assert(ok, `eat:grain lowers storehouse grain or a ripe field's growth (${b?.type} ${JSON.stringify(x)})`);
+      const ok = x && b?.kind === 'building' && ((b.type === 'store' && x.field === 'grain') || (b.type === 'field' && x.field === 'growth' && x.before >= 1)) && x.after < x.before;
+      h.assert(ok, `eat:grain lowers store grain or a ripe field's growth (${b?.type} ${JSON.stringify(x)})`);
     }
     {
       const strokeAt = { before: null, after: null };
@@ -205,7 +205,7 @@ export async function creatureTrial(game, h) {
         for (let dy = -r; dy <= r && id === null; dy++)
           for (let dx = -r; dx <= r && id === null; dx++)
             if (Math.max(Math.abs(dx), Math.abs(dy)) === r && vs.validate('house', vc.x + dx, vc.y + dy).ok) id = vs.placeBlueprint('house', vc.x + dx, vc.y + dy);
-      const wp = world.query({ kind: 'building' }).find((b) => b.type === 'woodpile' && b.owner === 'player');
+      const wp = world.query({ kind: 'building' }).find((b) => b.type === 'store' && b.owner === 'player');
       if (wp) wp.wood = Math.max(wp.wood, 250);
       // The village's builders haul to the same blueprint; a well-stocked village can fill it before
       // the creature arrives, so its cost is held out of reach for this case and put back after.
@@ -277,7 +277,7 @@ export async function creatureTrial(game, h) {
       h.log('weak state', JSON.stringify({ pose: st.pose, action: st.action, weak: st.weak }));
       cs.debug.holdHunger = null;
       cs.debug.candidateFilter = null;
-      for (const b of world.query({ kind: 'building' })) if (b.type === 'storehouse' && b.owner === 'player' && b.hp > 0) b.grain = Math.max(b.grain, 240);
+      for (const b of world.query({ kind: 'building' })) if (b.type === 'store' && b.owner === 'player' && b.hp > 0) b.grain = Math.max(b.grain, 240);
       const grainBefore = actsOf('eat:grain');
       const waited = waitFor(() => !brain.weak, 120);
       h.assert(waited < Infinity && actsOf('eat:grain') > grainBefore && brain.canThrow, `recovered after eating grain in ${waited.toFixed(1)} s (weak ${brain.weak}, hunger ${brain.needs.hunger.toFixed(2)})`);

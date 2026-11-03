@@ -4,8 +4,8 @@
 //                            (top-centre), rival belief split by awe and fear (top-right; full and
 //                            labelled converted once the village is won), creature needs, weak tab
 //                            and lean (bottom-left)
-//   build bar (src/ui/build.js) bottom-right: house, field, storehouse, woodpile with their wood
-//                            costs and the village's wood stock. Click a slot or press 1-4 to pick a
+//   build bar (src/ui/build.js) bottom-right: house, field, store with their wood
+//                            costs and the village's wood stock. Click a slot or press 1-3 to pick a
 //                            kind; a dithered ghost then follows the pointer, snapped to the tile under
 //                            it, green or red from village.validate(); a left click plans the
 //                            blueprint (village.placeBlueprint), a refused click shows the reason
