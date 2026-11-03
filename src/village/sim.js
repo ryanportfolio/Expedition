@@ -124,6 +124,19 @@ export function createVillageSim(game) {
   /** Footprint origin for a building centred on tile (tx, ty); even sizes extend toward +x/+y. */
   const origin = (k, tx, ty) => ({ ox: tx - ((k.fw - 1) >> 1), oy: ty - ((k.fh - 1) >> 1) });
 
+  /** True when (x, y) is inside `owner`'s village influence: within influenceR of its temple or
+   * buildingInfluenceR of a finished building of its own. Only finished buildings extend it. Round 43:
+   * any building not wrecked counted, so unbuilt blueprints placed one from the next chained across
+   * the island (6 woodpile blueprints reached 2.8 tiles from the rival centre) without anything being
+   * built. The mine, placed by setup about 10 tiles out, does not extend it either. */
+  function inRange(owner, x, y) {
+    const temple = villages[owner]?.temple;
+    if (temple && temple.hp > 0 && Math.hypot(temple.x - x, temple.y - y) <= T.influenceR) return true;
+    return own(owner).some((b) => b.stage === 'done' && b.type !== 'mine' && Math.hypot(b.x - x, b.y - y) <= T.buildingInfluenceR);
+  }
+  /** True when (x, y) is inside either village's influence: town land, kept free of new trees. */
+  const inTown = (x, y) => OWNERS.some((o) => inRange(o, x, y));
+
   /** { ok, reason } for a building of `type` centred on tile (tx, ty). `auto` (recovery re-placing a
    * lost building near its old spot): no influence check, and wrecks and blueprints all block. */
   function validate(type, tx, ty, owner = 'player', { setup = false, margin = 0, auto = false } = {}) {
@@ -144,16 +157,7 @@ export function createVillageSim(game) {
       }
     if (hi - lo > 1) return { ok: false, reason: 'too steep (height varies by more than 1)' };
     const cx = ox + k.fw / 2, cy = oy + k.fh / 2;
-    if (!setup && !auto) {
-      const v = villages[owner];
-      const temple = v?.temple;
-      const inTemple = temple && temple.hp > 0 && Math.hypot(temple.x - cx, temple.y - cy) <= T.influenceR;
-      // Only finished buildings extend the influence. Round 43: any building not wrecked counted, so
-      // unbuilt blueprints placed one from the next chained across the island (6 woodpile blueprints
-      // reached 2.8 tiles from the rival centre) without anything being built.
-      const nearB = own(owner).some((b) => b.stage === 'done' && Math.hypot(b.x - cx, b.y - cy) <= T.buildingInfluenceR);
-      if (!inTemple && !nearB) return { ok: false, reason: 'out of range (outside the village influence)' };
-    }
+    if (!setup && !auto && !inRange(owner, cx, cy)) return { ok: false, reason: 'out of range (outside the village influence)' };
     for (const b of world.query({ kind: 'building' })) {
       if (!auto && clearable(b, owner)) continue; // placeBlueprint clears it
       const bx = b.tx ?? Math.floor(b.x), by = b.ty ?? Math.floor(b.y), bw = b.fw ?? 1, bh = b.fh ?? 1;
@@ -234,6 +238,7 @@ export function createVillageSim(game) {
     const cleared = [];
     for (const w of world.query({ kind: 'building' }))
       if (clearable(w, owner) && w.tx < r.ox + k.fw && r.ox < w.tx + w.fw && w.ty < r.oy + k.fh && r.oy < w.ty + w.fh) {
+        if (w.stage === 'wrecked') salvageStock(w, true); // what clearing it would have saved is set down
         world.remove(w.id);
         cleared.push(w.id);
         if (w.stage !== 'wrecked') lose(w); // a re-placed blueprint built over: its building is still lost
@@ -381,6 +386,14 @@ export function createVillageSim(game) {
   }
   /** Wood left in a wreck: salvageShare (rounded down) of the timber built into it and of any wood stacked on it. */
   const salvageOf = (b) => Math.floor(((b.woodHave ?? 0) + (b.wood ?? 0)) * T.salvageShare);
+  /** Sets down salvageShare of wreck w's stored grain and ore as piles on its spot (and of its timber
+   * too when `wood`), for the villagers to take to a store. Shared by clearing a wreck and by a
+   * blueprint placed over one. */
+  function salvageStock(w, wood = false) {
+    const pile = (kind, amount) => world.spawn(kind, { x: w.x, y: w.y, z: world.heightAt(w.x, w.y), vx: 0, vy: 0, vz: 0, amount, grabbable: true, carriedBy: null, madeBy: 'village' });
+    for (const kind of ['grain', 'ore']) { const n = Math.floor((w[kind] ?? 0) * T.salvageShare); if (n > 0) pile(kind, n); }
+    if (wood && salvageOf(w) > 0) pile('wood', salvageOf(w));
+  }
   function clearWreck(v, w) {
     v.target = w.id;
     if (goto(v, bTile(w), w.id)) v.work = { t: T.buildStep, pose: 'work', clear: w };
@@ -705,7 +718,6 @@ export function createVillageSim(game) {
     const n = Math.min(it.amount ?? 1, storeRoom(depot, it.kind));
     depot[it.kind] += n;
     if (it.kind === 'wood') vill.woodDelivered += n;
-    if (it.kind === 'ore') vill.oreMined += n;
     it.amount = (it.amount ?? 1) - n;
     if (it.amount <= 0) { world.remove(it.id); v.carry = null; }
   }
@@ -876,8 +888,11 @@ export function createVillageSim(game) {
     const wood = woodIn(tree);
     removeTree(world, tree);
     // The feller replants: a sapling of the same kind where the tree stood (spec: foresters cut and
-    // replant). Only villagers do; the creature and the hand leave the ground bare.
-    plantSapling(tree.x, tree.y, tree.species);
+    // replant). Only villagers do; the creature and the hand leave the ground bare. Not on town land
+    // (inTown), which woodcutters clear for building as before, and not a tree the hand or the
+    // creature moved, which has no roots where it lies; the island's tree count regrows at forest
+    // edges instead (spread).
+    if (!tree.uprooted && !inTown(tree.x, tree.y)) plantSapling(tree.x, tree.y, tree.species);
     spawnItem('wood', v, wood);
     v.target = null;
   }
@@ -886,6 +901,7 @@ export function createVillageSim(game) {
     if (!usable(m) || !(m.ore >= 1)) return;
     const n = Math.min(T.oreLoad, Math.floor(m.ore));
     m.ore -= n;
+    villages[v.owner].oreMined += n;
     spawnItem('ore', v, n);
     if (m.ore < 1) events.emit('mine-empty', { buildingId: m.id, owner: m.owner });
   }
@@ -907,12 +923,12 @@ export function createVillageSim(game) {
     return t;
   }
 
-  /** True when a sapling may take root at (x, y): grass, no tree or rock on the tile, no building
-   * of either village within spreadClear, at most spreadCrowd trees within 1.6 tiles (a forest edge
-   * or open ground, not the thick of a wood). */
+  /** True when a sapling may take root at (x, y): grass outside both villages' influence (town land
+   * stays clear for building), no tree or rock on the tile, no building within spreadClear, at most
+   * spreadCrowd trees within 1.6 tiles (a forest edge or open ground, not the thick of a wood). */
   function seedable(x, y) {
     const tx = Math.floor(x), ty = Math.floor(y);
-    if (!world.inBounds(tx, ty) || world.ground[tileAt(tx, ty)] !== 3) return false;
+    if (!world.inBounds(tx, ty) || world.ground[tileAt(tx, ty)] !== 3 || inTown(x, y)) return false;
     const onTile = (e) => Math.floor(e.x) === tx && Math.floor(e.y) === ty;
     const trees = world.query({ kind: 'tree', x, y, r: 1.6 });
     if (trees.length > T.spreadCrowd || trees.some(onTile)) return false;
@@ -923,11 +939,11 @@ export function createVillageSim(game) {
     return true;
   }
 
-  /** Saplings and other young trees grow; uprooted, held or flying ones stop. */
+  /** Saplings and other young trees grow, except while held or flying. */
   function grow(dt) {
     for (const id of growing) {
       const t = world.get(id);
-      if (!t || t.kind !== 'tree' || t.uprooted || !((t.growth ?? 1) < 1)) { growing.delete(id); continue; }
+      if (!t || t.kind !== 'tree' || !((t.growth ?? 1) < 1)) { growing.delete(id); continue; }
       if (t.held || t.airborne) continue;
       t.growth = Math.min(1, t.growth + dt / T.treeGrowTime);
     }
@@ -1208,12 +1224,10 @@ export function createVillageSim(game) {
         b.clearLeft = (b.clearLeft ?? T.clearTime) - dt;
         if (b.clearLeft <= 0) {
           // Sound timber is salvaged from the wreck: the builder carries it off (or leaves it there).
-          const salvage = salvageOf(b), sacks = Math.floor((b.grain ?? 0) * T.salvageShare), ore = Math.floor((b.ore ?? 0) * T.salvageShare);
-          world.remove(b.id); v.work = null; v.target = null;
+          const salvage = salvageOf(b);
           // Grain and ore pulled from a store wreck are set down for the farmers and miners to take to a store.
-          const pile = (kind, amount) => world.spawn(kind, { x: b.x, y: b.y, z: world.heightAt(b.x, b.y), vx: 0, vy: 0, vz: 0, amount, grabbable: true, carriedBy: null, madeBy: 'village' });
-          if (sacks > 0) pile('grain', sacks);
-          if (ore > 0) pile('ore', ore);
+          salvageStock(b);
+          world.remove(b.id); v.work = null; v.target = null;
           if (salvage > 0) {
             if (!carried(v)) spawnItem('wood', v, salvage);
             else world.spawn('wood', { x: v.x, y: v.y, z: world.heightAt(v.x, v.y), vx: 0, vy: 0, vz: 0, amount: salvage, grabbable: true, carriedBy: null, madeBy: 'village' });
@@ -1426,6 +1440,8 @@ export function createVillageSim(game) {
     buildingAt, handSource, handTake, handSink, handPut, canGodBuild, godBuild,
     /** True when a sapling could take root at (x, y) now (the spread's and rain's test). */
     seedable: (x, y) => !!mapRef && seedable(x, y),
+    /** True when (x, y) is town land (either village's influence): no replanting or seeding there. */
+    inTown: (x, y) => !!mapRef && inTown(x, y),
     get ready() { return mapRef !== null && mapRef === world.height; },
     get time() { return time; },
     village(owner) { return villages[owner]; },

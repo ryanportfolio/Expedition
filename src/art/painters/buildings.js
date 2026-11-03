@@ -535,7 +535,7 @@ function mine(owner) {
     const stone = rival ? STONE_R : 'rock', timber = rival ? 'clay' : 'bark';
     const rough = (b) => mat.fieldstone(b, stone, !rival);
     return {
-      apron: (s, fw, fh) => apron(s, fw, fh, (wx, wy, x, y, edge) => {
+      apron: rival ? aprons.cobbles : (s, fw, fh) => apron(s, fw, fh, (wx, wy, x, y, edge) => {
         const n = hash(x, y, 63);
         if (edge < 0.08 && n % 2) return C('grass', 3);
         if (n % 9 === 0) return C(stone, 3); // spoil chips

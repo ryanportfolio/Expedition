@@ -164,7 +164,10 @@ export default async function perf(t, game) {
   t.log('towns', JSON.stringify({ pop, want: town.want, have: town.have, park: { x: +park.x.toFixed(1), y: +park.y.toFixed(1), trees: park.n }, openSites: OPEN_SITES, entities: world.entities.size }));
 
   // ---- let the towns settle (jobs dealt, builders and farmers under way)
-  for (let s = 0; s < SETTLE; s += 5) { t.step(5); keepSites(); }
+  // The creature waits by its start spot beside the village meanwhile (tethered, below), so the scene
+  // can frame it with the temple and the town.
+  const cStart = world.sites.creatureStart;
+  for (let s = 0; s < SETTLE; s += 5) { events.emit('tether', { creatureId: cs.entity.id, x: cStart.x + 0.5, y: cStart.y + 0.5 }); t.step(5); keepSites(); }
   const player = (kind) => world.query({ kind }).filter((e) => e.owner === 'player');
   const standing = (b) => b.stage === 'done' && b.hp > 0;
   const village = () => {
@@ -184,7 +187,11 @@ export default async function perf(t, game) {
   // ---- where the miracles land
   const centre = { x: (temple.x + home.x) / 2 + 0.5, y: (temple.y + home.y) / 2 + 0.5 };
   const c = cs.entity;
-  const view = { x: (temple.x + centre.x * 2 + c.x) / 4, y: (temple.y + centre.y * 2 + c.y) / 4 };
+  // Tethered where it stands, the creature stays in the framed view: hungry and untethered it sets
+  // off for grain anywhere on the island, and which store or field it picks is dice (step 3's layout
+  // sent it out of frame on some runs).
+  events.emit('tether', { creatureId: c.id, x: c.x, y: c.y });
+  const view ={ x: (temple.x + centre.x * 2 + c.x) / 4, y: (temple.y + centre.y * 2 + c.y) / 4 };
   const inView = (p, pad = 0) => p.sx >= pad && p.sx < game.display.w - pad && p.sy >= pad && p.sy < game.display.h - pad;
   const byDist = (p) => (a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y) || a.id - b.id;
   const buildingGap = (e, B) => {

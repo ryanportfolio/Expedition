@@ -1,5 +1,5 @@
 // Hand system: the player's divine hand. It floats over the terrain under the pointer, picks up,
-// carries and throws things, draws grain and wood out in bulk, strokes and slaps the creature, and
+// carries and throws things, draws grain, wood and ore out in bulk, strokes and slaps the creature, and
 // points the creature somewhere.
 //
 // Input map (user decisions): left press on a grabbable thing grabs it; dragging carries it and
@@ -14,7 +14,7 @@
 //   ore heap) ore, the middle (the barn) grain, the right third (the log stack) wood (storeKindAt).
 //   On a tree or an ore rock, a press held still for treeDrawDelay draws the tree's wood or the
 //   rock's ore (one drained empty is gone), while a press that moves picks it up as before. The amount grows faster the longer the button is held (HAND.draw) and rides in the hand
-//   as one wood or grain pile. While the button stays down the hand keeps drawing from every source
+//   as one grain, wood or ore pile. While the button stays down the hand keeps drawing from every source
 //   of that resource it passes over (stores only when the press began on a store).
 // - Dropping a pile, a tree or an ore rock slowly on a player store puts it in stock, as much as the
 //   store has room for (VILLAGE.storeCap of each resource); wood or a tree on a blueprint short of

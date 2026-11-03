@@ -181,12 +181,10 @@ for (const withGrain of [true, false]) {
 }
 
 // ---- training still decides: three strokes right after a forced act make it frequent; one slap
-// makes it never happen. Seeds 13, 21 and 4, the stroke bound on their total: one seed's count is
-// dice (step 3 moved the village's layout and random draws, and seed 13's stroked eat:villager went
-// from 8 to 4 while seed 21's went from 4 to 12; over seeds 4-6 and 13-21 the mean barely moved).
+// makes it never happen
 for (const k of HARM) {
-  const count = (seed, train) => {
-    const game = bootGame(seed);
+  const count = (train) => {
+    const game = bootGame(13);
     const { events } = game;
     const cs = game.systems.creature;
     game.clock.run(5 * 30, game.tick);
@@ -204,12 +202,9 @@ for (const k of HARM) {
     game.clock.run(240 * 30, game.tick);
     return { n: n - before, fed, forbidden: cs.brain.isForbidden(k) };
   };
-  const seeds = [13, 21, 4];
-  const plain = seeds.map((s) => count(s, 0)), stroked = seeds.map((s) => count(s, 3));
-  const sum = (list) => list.reduce((a, r) => a + r.n, 0);
-  check(stroked.every((r) => r.fed === 3) && sum(stroked) >= 5 * seeds.length && sum(stroked) >= 2 * sum(plain),
-    `${k}: stroked 3 times it is chosen ${sum(stroked)} times in 4 free minutes over seeds ${seeds.join(', ')} (${stroked.map((r) => r.n).join(' + ')}; untrained ${sum(plain)})`);
-  const slapped = count(13, -1);
+  const plain = count(0), stroked = count(3), slapped = count(-1);
+  check(stroked.fed === 3 && stroked.n >= 5 && stroked.n >= 2 * plain.n,
+    `${k}: stroked 3 times it is chosen ${stroked.n} times in 4 free minutes (untrained ${plain.n})`);
   check(slapped.fed === 1 && slapped.forbidden && slapped.n === 0, `${k}: slapped once it is never chosen in 4 free minutes (${slapped.n}, forbidden ${slapped.forbidden})`);
 }
 
@@ -244,16 +239,11 @@ function trainedRun(seed, key, feedback, hunger) {
   // candidateFilter also turns the restraint off), and every slap run counts the decisions that
   // offered the key to brain.choose; the check below wants at least one.
   if (feedback === 'slap' && key === 'eat:villager') cs.debug.candidateFilter = (c) => c.key !== 'eat:grain';
-  // Step 3: held at hunger 1, the creature leaves for the rival's grain the moment the player's store
-  // is empty at a decision (dice: on seed 21 that came at 2 of the 4 minutes, after which no villager
-  // was in reach and throw:villager was offered 0 times). The slap runs keep the player's store
-  // stocked, so the creature stays among the villagers and the key keeps reaching the brain.
-  const keepFed = () => { for (const b of game.world.query({ kind: 'building' })) if (b.type === 'store' && b.owner === 'player' && b.hp > 0) b.grain = Math.max(b.grain, 240); };
   let offered = 0;
   const choose = cs.brain.choose;
   cs.brain.choose = (list, now) => { if (list.some((c) => c.key === key)) offered++; return choose(list, now); };
   cs.debug.holdHunger = hunger;
-  for (let i = 0; i < 240 * 30; i++) { if (feedback === 'slap' && i % 30 === 0) keepFed(); game.tick(STEP); feed(); }
+  for (let i = 0; i < 240 * 30; i++) { game.tick(STEP); feed(); }
   cs.debug.holdHunger = null;
   cs.brain.choose = choose;
   cs.debug.candidateFilter = null;

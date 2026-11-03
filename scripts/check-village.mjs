@@ -1008,8 +1008,7 @@ const overlaps = (game) => {
 // seed 1000 + g, g = 1..10), everything measured at the end of the 10 chaos minutes (no calm period
 // after). In every seed: the player village never has more than VILLAGE.rebuildSites re-placed
 // (lost-building) sites open at once; it finishes 2+ re-placed lost buildings while the chaos runs
-// and has 2+ of them standing finished at the end (in 9 of the 10 seeds, 3+ on average: see below);
-// at the end its stores hold wood
+// and has 2+ of them standing finished at the end; at the end its stores hold wood
 // or grain (only standing, finished stores count; the temple holds no stock); it has 3+ villagers;
 // the chaos god cast at least one paid fire or lightning (so a run where every cast fizzled, an
 // easy run, fails); and every walking step was legal throughout.
@@ -1042,14 +1041,7 @@ const overlaps = (game) => {
   check(rows.every((r) => !r.threw), `sweep: no exception${rows.some((r) => r.threw) ? ` (${rows.filter((r) => r.threw).map((r) => `${r.g}/${r.c}: ${r.threw.stack || r.threw}`).join('; ')})` : ''}`);
   check(rows.every((r) => r.maxAuto <= VILLAGE.rebuildSites), `sweep: never more than ${VILLAGE.rebuildSites} re-placed sites open (most: ${per((r) => r.maxAuto)})`);
   check(rows.every((r) => r.autoDone >= 2), `sweep: 2+ re-placed lost buildings finished during the chaos (${per((r) => r.autoDone)})`);
-  // Standing at the end is dice in part: a cast in the last minutes burns what was rebuilt (round 28
-  // measured 5 such misses in 300 runs). Step 3 (one store, the mine) moved the layout and the random
-  // draws; over seeds 1-40 main had 40 runs with 2+ standing (mean 5.18) and step 3 has 39 (mean
-  // 5.45; the miss is seed 1, 3 finished and 1 left standing). So one miss in ten is allowed, with a
-  // floor on the mean.
-  const standingMean = rows.reduce((s, r) => s + r.standing, 0) / rows.length;
-  check(rows.filter((r) => r.standing >= 2).length >= rows.length - 1 && standingMean >= 3,
-    `sweep: 2+ re-placed lost buildings standing finished at the end of the chaos in all seeds but at most one, ${standingMean.toFixed(1)} on average (${per((r) => r.standing)})`);
+  check(rows.every((r) => r.standing >= 2), `sweep: 2+ re-placed lost buildings standing finished at the end of the chaos (${per((r) => r.standing)})`);
   check(rows.every((r) => r.wood > 0 || r.grain > 0), `sweep: wood or grain in the stores at the end of the chaos (${per((r) => `wood ${r.wood} grain ${r.grain}`)})`);
   check(rows.every((r) => r.pop >= 3), `sweep: 3+ villagers at the end of the chaos (${per((r) => r.pop)})`);
   check(rows.every((r) => r.casts.fire + r.casts.lightning > 0), `sweep: the chaos god cast paid miracles in every seed (${per((r) => `fire ${r.casts.fire} lightning ${r.casts.lightning}`)})`);
@@ -1281,8 +1273,8 @@ for (const kind of ['wood', 'grain']) for (const seed of [1, 2]) {
   const playerOreCarried = () => world.query({ kind: 'ore' }).filter((it) => world.get(it.carriedBy)?.owner === 'player').reduce((s, it) => s + it.amount, 0);
   game.clock.run(2 * MIN, game.tick);
   const s2 = vs.stats().player;
-  check(s2.jobs.miner >= 1 && s2.ore > 0 && VILLAGE.mineOre - mine.ore === s2.oreMined + playerOreCarried(),
-    `miners carry ore from the mine to the store (${s2.jobs.miner} miners, store ore ${s2.ore}, mine ${mine.ore} of ${VILLAGE.mineOre}, mined ${s2.oreMined} + ${playerOreCarried()} carried)`);
+  check(s2.jobs.miner >= 1 && s2.ore > 0 && VILLAGE.mineOre - mine.ore === s2.oreMined && s2.ore + playerOreCarried() === s2.oreMined,
+    `miners carry ore from the mine to the store (${s2.jobs.miner} miners, store ore ${s2.ore} + ${playerOreCarried()} carried, mine ${mine.ore} of ${VILLAGE.mineOre}, mined ${s2.oreMined})`);
   game.clock.run(6 * MIN, game.tick);
   const s8 = vs.stats().player;
   check(s8.ore >= VILLAGE.oreTarget && s8.ore <= VILLAGE.oreTarget + VILLAGE.minersPerMine * VILLAGE.oreLoad && s8.jobs.miner === 0,
@@ -1292,6 +1284,17 @@ for (const kind of ['wood', 'grain']) for (const seed of [1, 2]) {
   world.move(v, mine.x, mine.y, world.heightAt(mine.x, mine.y));
   game.events.emit('landed', { entityId: v.id, speed: 0.5 });
   check(v.job === 'miner' && v.lockUntil > vs.sim.time, `a villager dropped at the mine mines (${v.job}, locked ${(v.lockUntil - vs.sim.time).toFixed(0)} s)`);
+  // The mine is no finished building of the town: it does not widen where the player may build.
+  // Spots within 3 tiles of it that neither temple nor any other finished building reaches stay out
+  // of range.
+  const others = world.query({ kind: 'building' }).filter((b) => b.stage === 'done' && b.type !== 'mine');
+  const temples = others.filter((b) => b.type === 'temple');
+  const reached = (x, y) => temples.some((t) => Math.hypot(t.x - x, t.y - y) <= VILLAGE.influenceR) ||
+    others.some((b) => Math.hypot(b.x - x, b.y - y) <= VILLAGE.buildingInfluenceR);
+  const spots = [];
+  for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) if (!reached(mine.x + dx, mine.y + dy)) spots.push([mine.x + dx, mine.y + dy]);
+  const widened = spots.filter(([x, y]) => vs.sim.inTown(x, y));
+  check(spots.length >= 5 && widened.length === 0, `the mine does not extend the village influence (${widened.length} of ${spots.length} spots beside it count as town)`);
 }
 {
   // The mine runs out: its last ore goes to the store, it says so once, and no one mines it after.
@@ -1328,22 +1331,33 @@ for (const kind of ['wood', 'grain']) for (const seed of [1, 2]) {
     `a store never holds more than storeCap grain (most ${most}, cap ${VILLAGE.storeCap}), and a full store sends no one to farm (${s.jobs.farmer} farmers)`);
 }
 {
-  // Woodcutters replant: every tree felled near the village has a sapling of its kind where it stood;
-  // saplings grow 1/treeGrowTime a second.
+  // Woodcutters replant: every tree felled outside town land has a sapling of its kind where it stood;
+  // trees felled on town land (either village's influence) leave it clear for building, as before
+  // step 3. Saplings grow 1/treeGrowTime a second.
   const game = newGame(1);
   const { world } = game;
-  const before = new Map(world.query({ kind: 'tree' }).map((t) => [t.id, { x: t.x, y: t.y, species: t.species }]));
-  game.clock.run(2 * MIN, game.tick);
+  const vs = game.systems.village;
+  const before = new Map(world.query({ kind: 'tree' }).map((t) => [t.id, { x: t.x, y: t.y, species: t.species, town: vs.sim.inTown(t.x, t.y) }]));
+  game.clock.run(3 * MIN, game.tick);
   const gone = [...before].filter(([id]) => !world.get(id)).map(([, t]) => t);
   const now = world.query({ kind: 'tree' });
-  const replanted = gone.filter((t) => now.some((n) => !before.has(n.id) && n.species === t.species && Math.abs(n.x - t.x) < 1e-9 && Math.abs(n.y - t.y) < 1e-9));
-  check(gone.length >= 3 && replanted.length === gone.length, `woodcutters replant: ${replanted.length} of ${gone.length} felled trees have a sapling of their kind on their spot`);
+  const sapling = (t) => now.some((n) => !before.has(n.id) && n.species === t.species && Math.abs(n.x - t.x) < 1e-9 && Math.abs(n.y - t.y) < 1e-9);
+  const wild = gone.filter((t) => !t.town), town = gone.filter((t) => t.town);
+  check(wild.length >= 2 && wild.every(sapling), `woodcutters replant: ${wild.filter(sapling).length} of ${wild.length} trees felled outside town land have a sapling of their kind on their spot`);
+  check(town.length >= 2 && !town.some(sapling), `trees felled on town land are not replanted (${town.filter(sapling).length} of ${town.length})`);
   const young = now.filter((t) => !before.has(t.id) && t.growth < 0.4);
   const g0 = new Map(young.map((t) => [t.id, t.growth]));
   game.clock.run(60 * 30, game.tick);
   const grew = young.filter((t) => world.get(t.id) && Math.abs(t.growth - g0.get(t.id) - 60 / VILLAGE.treeGrowTime) < 0.01);
   check(young.length > 0 && grew.length === young.filter((t) => world.get(t.id)).length,
     `saplings grow ${(60 / VILLAGE.treeGrowTime).toFixed(2)} a minute (${grew.length} of ${young.length})`);
+  // A sapling the hand moves keeps growing where it is set down; a moved grown tree felled by a
+  // woodcutter is not replanted where it lay.
+  const s0 = young.find((t) => world.get(t.id));
+  s0.held = true; game.tick(1 / 30); s0.held = false; s0.uprooted = true;
+  const g1 = s0.growth;
+  game.clock.run(30 * 30, game.tick);
+  check(s0.growth > g1 + 0.1, `a sapling picked up and set down keeps growing (${g1.toFixed(3)} -> ${s0.growth.toFixed(3)})`);
 }
 /** Clears up to n trees far from both villages (a wild wood), as the hand would, and returns them. */
 function clearWood(game, n) {
@@ -1376,7 +1390,7 @@ function forestRun(seed) {
       fresh.push(t);
       const tx = Math.floor(t.x), ty = Math.floor(t.y);
       const nearB = buildings(game, 'player').concat(buildings(game, 'rival')).some((b) => Math.max(0, Math.hypot(Math.max(b.tx - t.x, 0, t.x - (b.tx + b.fw)), Math.max(b.ty - t.y, 0, t.y - (b.ty + b.fh)))) <= VILLAGE.spreadClear);
-      if (world.ground[ty * W + tx] !== 3 || nearB) bad.push(`${t.x.toFixed(1)},${t.y.toFixed(1)}`);
+      if (world.ground[ty * W + tx] !== 3 || nearB || vs.sim.inTown(t.x, t.y)) bad.push(`${t.x.toFixed(1)},${t.y.toFixed(1)}`);
     }
   }
   return { game, cap, cleared, fresh, most, bad, trees: world.query({ kind: 'tree' }).map((t) => `${t.x.toFixed(3)},${t.y.toFixed(3)},${t.species},${t.growth.toFixed(4)}`).join(';'), stats: JSON.stringify(vs.stats()) };
@@ -1385,7 +1399,7 @@ function forestRun(seed) {
   const a = forestRun(4), b = forestRun(4);
   const spread = a.fresh.filter((t) => !a.cleared.some((c) => Math.abs(c.x - t.x) < 1e-9 && Math.abs(c.y - t.y) < 1e-9));
   check(spread.length >= 10 && a.most <= a.cap, `forests spread back: ${spread.length} saplings seeded in 6 minutes after 60 trees were cleared, never more than the ${a.cap} the island started with (most ${a.most})`);
-  check(a.bad.length === 0, `seeded saplings stand on grass, clear of buildings${a.bad.length ? ` (${a.bad.slice(0, 5).join(' ')})` : ''}`);
+  check(a.bad.length === 0, `seeded saplings stand on grass, clear of buildings and off town land${a.bad.length ? ` (${a.bad.slice(0, 5).join(' ')})` : ''}`);
   check(a.trees === b.trees && a.stats === b.stats, 'the same seed replays the same forests, stocks and jobs');
 }
 {
@@ -1420,6 +1434,21 @@ function forestRun(seed) {
   // Saplings there by mid-rain have 5 s of it left: 5 x growthRate (0.08/s) on top of treeGrowTime.
   check(early.length && early.every((t) => t.growth > 0.35), `the rain miracle grows its saplings (${early.length} sprouted in the first 5 s, growth ${early.map((t) => t.growth.toFixed(2)).join(' ')} at 10 s)`);
   check(vs.stats().trees <= vs.stats().treeCap, 'rain never grows the island past its starting tree count');
+}
+{
+  // A blueprint placed over a store wreck sets down the wreck's salvage, as clearing it would.
+  const game = newGame(2);
+  const vs = game.systems.village, { world } = game;
+  const store = buildings(game, 'player', 'store')[0];
+  Object.assign(store, { grain: 1000, ore: 400 });
+  const wood = Math.floor((store.woodHave + store.wood) * VILLAGE.salvageShare);
+  store.hp = 0;
+  game.tick(1 / 30);
+  const at = { x: store.x, y: store.y };
+  const id = vs.placeBlueprint('store', store.tx + 1, store.ty + 1);
+  const piles = (kind) => world.query({ kind, x: at.x, y: at.y, r: 0.5 }).reduce((s, it) => s + it.amount, 0);
+  check(id !== null && !world.get(store.id) && piles('grain') === 750 && piles('ore') === 300 && piles('wood') === wood,
+    `a blueprint over a store wreck leaves its salvage (grain ${piles('grain')}, ore ${piles('ore')}, wood ${piles('wood')})`);
 }
 {
   // A store wreck: clearing it salvages salvageShare of its ore as a pile on its spot.
