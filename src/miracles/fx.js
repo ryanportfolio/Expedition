@@ -4,6 +4,7 @@
 // Two thin wrappers live here:
 // - rainCloud: pixelfx lightning/storm-cloud with the one bolt it throws per loop cut out (frames 51-71:
 //   the bolt and the sparks it throws). Rain is a good miracle; a bolt would read as lightning damage.
+//   The drawing is in rain-cloud.js, which caches the cloud body per loop frame.
 // - orbGlow: a small looping glow written against the pixelfx painter, because the library's orb
 //   effects (arcane-orb, water-orb, plasma-ball, spell-charge) are 30-120 px across and the pedestals
 //   stand 1.5 tiles apart. It sits on the orb sprite: a tinted halo, a pulsing light, a bright core and
@@ -13,7 +14,6 @@
 //   ground, so the halo is an alpha-blended disc of the palette's saturated middle color (C[2]) and
 //   the light uses C[2]; only the core and the front mote reach the near-white C[4].
 import * as stormCloud from 'pixelfx/fx/lightning/storm-cloud';
-import * as shadowFlames from 'pixelfx/fx/shadow/shadow-flames';
 import * as spiritFlame from 'pixelfx/fx/fire/spirit-flame';
 import * as fireRing from 'pixelfx/fx/fire/fire-ring';
 import * as healAoe from 'pixelfx/fx/holy/heal-aoe';
@@ -21,13 +21,16 @@ import * as lightningStrike from 'pixelfx/fx/lightning/lightning-strike';
 import * as poof from 'pixelfx/fx/spawn/poof';
 import { fit, sparkle } from 'pixelfx';
 import { TUNING } from './tuning.js';
+import { createRainCloud } from './rain-cloud.js';
+import { flames } from './flames.js';
 
-// ---- rain cloud without its bolt
+// ---- rain cloud without its bolt (storm-cloud's drawing lives in rain-cloud.js, cached per instance)
 const SKIP_FROM = 51, SKIP = 21, FPS = 30;
 export const rainCloud = {
   meta: { ...stormCloud.meta, name: 'Rain cloud', duration: stormCloud.meta.duration - SKIP / FPS },
-  draw(p, t, o) {
-    stormCloud.draw(p, t * FPS < SKIP_FROM ? t : t + SKIP / FPS, o);
+  create() {
+    const cloud = createRainCloud();
+    return { draw: (p, t, o) => cloud.draw(p, t * FPS < SKIP_FROM ? t : t + SKIP / FPS, o) };
   },
 };
 
@@ -97,9 +100,9 @@ export const FX = {
   }],
   /** Ignition ring; reach in px matches the fire radius on screen (a tile radius is ~22.6 px wide). */
   fireRing: (reach, seed) => [fireRing, { palette: FIRE, reach, seed }],
-  /** Flames on a burning building or tree: pixelfx shadow/shadow-flames recolored to a natural fire. Its
+  /** Flames on a burning building or tree: pixelfx shadow/shadow-flames (flames.js) recolored to a natural fire. Its
    * black heart reads as the charred frame inside the blaze; no logs, unlike the campfire. */
-  burnLarge: (seed) => [shadowFlames, { palette: STRUCTURE_FIRE, seed, light: 0.8 }],
+  burnLarge: (seed) => [flames, { palette: STRUCTURE_FIRE, seed, light: 0.8 }],
   /** Flames on a burning villager: a single loose flame, no timbers. */
   burnSmall: (seed) => [spiritFlame, {
     palette: ['#3a1210', '#7a2414', '#b8401a', '#e0661e', '#f58a2a', '#ffb03a', '#ffd66a', '#fff0b0', '#ffffff'],

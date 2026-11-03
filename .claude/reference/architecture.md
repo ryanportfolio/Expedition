@@ -26,7 +26,8 @@ flowchart LR
 - Iso math (projection, picking): `src/world/iso.js`
 - Sprite registry: `src/art/registry.js`
 - Palette: `src/art/palette.js`; LUT: `src/art/lut.js`
-- Effects layer: `src/render/fx.js`
+- Effects layer: `src/render/fx.js`; its faster pixelfx glow: `src/render/glow.js`
+- Copies of pixelfx effects with caches (same pixels): rain cloud `src/miracles/rain-cloud.js`, burning flames `src/miracles/flames.js`
 
 ## State (doc: "The game object")
 - Game object: `createGame` in `src/game.js`.

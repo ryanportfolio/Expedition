@@ -1,15 +1,18 @@
 // Frame-time check in the worst-case scene (src/dev/scenarios/perf.js: a town of hundreds of
 // villagers round each village, the creature and all four miracles alive), on the real-time loop.
 //
-//   node scripts/perf-check.mjs [--budget <ms>] [--warmup <s>] [--seconds <s>] [--window <WxH>] [--out <dir>]
-//                               [--scenario <name>] [--town <n>] [--rival <n>]
+//   node scripts/perf-check.mjs [--budget <ms>] [--warmup <s>] [--seconds <s>] [--window <WxH>[,<WxH>...]]
+//                               [--out <dir>] [--scenario <name>] [--town <n>] [--rival <n>]
 //
 // --town and --rival set the villagers in the player and rival towns (default: TOWN in src/dev/town.js).
+// --window lists the page sizes to measure, one after another in the same Chrome (default
+// 1920x1080,2880x1620: zoom 1, a 640 x 360 view, and the camera zoomed all the way out, scale 2 and a
+// 960 x 540 view, which has the most sprites and effect pixels in view). Each must pass.
 //
 // Builds with Vite, serves dist from node on an ephemeral port, opens headed Chrome through
 // launchPlacedChrome() (off screen, muted; never headless, never minimized, so rAF runs at the
-// display rate) with a 1920x1080 viewport at a device pixel ratio of 1. First it measures the display
-// refresh rate from rAF in an empty page, then opens ?scenario=perf, waits for window.__perf.ready
+// display rate) at a device pixel ratio of 1. First it measures the display refresh rate from rAF in
+// an empty page, then, per window, opens ?scenario=perf in a page of that size, waits for window.__perf.ready
 // (the scene handed to game.start()), warms up 5 s and records 20 s of real frames: the frame time is
 // the gap between consecutive rAF timestamps, and inside the page the scene's profiler splits each
 // game.frame into sim ticks and render phases (terrain, systems draw, collect, fx back, sort+blit,
@@ -21,10 +24,11 @@
 // (the scene's tick hook stamps each tick on which an effect was not alive). A failed check fails
 // the run whatever the frame times.
 //
-// Output: stdout and <out>/perf.json (default D:/screenshots/Expedition/<basename of cwd>/perf/), plus
-// one screenshot of the running scene in <out>/perf-check/scene.png (a subfolder, because
-// browser-check clears PNGs in the perf folder itself). Exit 1 when p95 frame time is over the
-// budget (default 16.7 ms), the end-of-window check fails or the run fails, else 0. --scenario runs
+// Output: stdout; per window <out>/<W>x<H>/perf.json and one screenshot of the running scene in
+// <out>/<W>x<H>/perf-check/scene.png (a subfolder, because browser-check clears PNGs in the perf folder
+// itself); and <out>/perf.json with the display rate and each window's verdict (default <out>:
+// D:/screenshots/Expedition/<basename of cwd>/perf/). Exit 1 when, in any window, p95 frame time is
+// over the budget (default 16.7 ms), the end-of-window check fails or the run fails, else 0. --scenario runs
 // another scene that installs the same window.__perf (default perf), for example a copy that aims
 // fire at the houses to prove the end-of-window check fails. Chrome and the server are closed on every path.
 import fs from 'node:fs';
@@ -34,7 +38,7 @@ import { serveStatic } from './lib/static-server.mjs';
 import { launchPlacedChrome } from './lib/launch-chrome.mjs';
 
 function parseArgs(argv) {
-  const o = { budget: 16.7, warmup: 5, seconds: 20, window: '1920x1080', out: null, scenario: 'perf', town: null, rival: null };
+  const o = { budget: 16.7, warmup: 5, seconds: 20, window: '1920x1080,2880x1620', out: null, scenario: 'perf', town: null, rival: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => {
@@ -54,11 +58,12 @@ function parseArgs(argv) {
   for (const k of ['budget', 'seconds']) if (!(o[k] > 0)) throw new Error(`--${k} must be a positive number`);
   if (!(o.warmup >= 0)) throw new Error('--warmup must be 0 or more');
   for (const k of ['town', 'rival']) if (o[k] !== null && !(Number.isInteger(o[k]) && o[k] >= 0)) throw new Error(`--${k} must be a whole number`);
-  const m = /^(\d+)x(\d+)$/.exec(o.window);
-  if (!m) throw new Error(`--window must be WxH, got ${o.window}`);
+  o.windows = o.window.split(',').map((w) => {
+    const m = /^(\d+)x(\d+)$/.exec(w);
+    if (!m) throw new Error(`--window must be WxH or a comma list of them, got ${o.window}`);
+    return { width: Number(m[1]), height: Number(m[2]) };
+  });
   if (!/^[\w-]+$/.test(o.scenario)) throw new Error(`--scenario must be a scenario file name, got ${o.scenario}`);
-  o.width = Number(m[1]);
-  o.height = Number(m[2]);
   return o;
 }
 
@@ -113,26 +118,56 @@ async function main() {
   const o = parseArgs(process.argv.slice(2));
   if (!process.env.CHROME_PLACE) process.env.CHROME_PLACE = 'offscreen';
   const out = outDir(o);
-  fs.mkdirSync(path.join(out, 'perf-check'), { recursive: true });
+  fs.mkdirSync(out, { recursive: true });
   const buildDir = path.resolve('.tmp/perf-check', String(process.pid));
-  const result = { ok: false, budgetMs: o.budget, window: { width: o.width, height: o.height }, warmupS: o.warmup, recordS: o.seconds, error: null, consoleErrors: [], pageErrors: [] };
+  const summary = { ok: false, budgetMs: o.budget, display: null, windows: [], error: null };
+  const results = [];
   let server = null, browser = null;
   try {
     await build({ root: process.cwd(), logLevel: 'warn', build: { outDir: buildDir, emptyOutDir: true } });
     server = await serveStatic(buildDir);
     browser = await launchPlacedChrome({ args: ['--mute-audio'], purpose: 'perf-check' });
-    const context = await browser.newContext({ viewport: { width: o.width, height: o.height }, deviceScaleFactor: 1 });
-    const page = await context.newPage();
-    page.on('console', (m) => { if (m.type() === 'error') result.consoleErrors.push(m.text()); });
-    page.on('pageerror', (e) => result.pageErrors.push(String(e?.stack || e)));
 
     // ---- display refresh rate, from rAF in an empty page
+    const context = await browser.newContext({ viewport: o.windows[0], deviceScaleFactor: 1 });
+    const page = await context.newPage();
     await page.setContent('<!doctype html><title>refresh</title><body style="margin:0;background:#000"></body>');
     await rafGaps(page, 500); // settle
     const empty = (await rafGaps(page, 3000)).gaps;
     const refreshMs = pct(empty, 50);
-    result.display = { refreshHz: r2(1000 / refreshMs), frameMs: r2(refreshMs), samples: empty.length, p95Ms: r2(pct(empty, 95)) };
-    console.log(`[perf-check] display: ${result.display.refreshHz} Hz from rAF in an empty page (median gap ${result.display.frameMs} ms over ${empty.length} frames)`);
+    summary.display = { refreshHz: r2(1000 / refreshMs), frameMs: r2(refreshMs), samples: empty.length, p95Ms: r2(pct(empty, 95)) };
+    console.log(`[perf-check] display: ${summary.display.refreshHz} Hz from rAF in an empty page (median gap ${summary.display.frameMs} ms over ${empty.length} frames)`);
+    await context.close();
+
+    for (const win of o.windows) results.push(await measure(browser, server, o, win, path.join(out, `${win.width}x${win.height}`), summary.display));
+  } catch (err) {
+    summary.error = String(err?.stack || err);
+  } finally {
+    if (browser) await browser.close().catch((e) => console.warn(`[perf-check] browser close: ${e.message}`));
+    if (server) await server.close();
+    fs.rmSync(buildDir, { recursive: true, force: true });
+  }
+  summary.windows = results.map((r) => ({ window: r.window, ok: r.ok, p95Ms: r.frames?.p95Ms ?? null, overBudget: r.frames?.overBudget ?? null, tickFrameWorkP95Ms: r.work?.tickFrames.frame.p95Ms ?? null, error: r.error }));
+  summary.ok = !summary.error && results.length === o.windows.length && results.every((r) => r.ok);
+  fs.writeFileSync(path.join(out, 'perf.json'), JSON.stringify(summary, null, 2));
+  if (summary.error) console.log(`  ERROR ${summary.error}`);
+  console.log(`[perf-check] perf.json in ${out}`);
+  console.log(`[perf-check] ${summary.ok ? 'PASS' : 'FAIL'}: ${summary.windows.map((w) => `${w.window.width}x${w.window.height} ${w.ok ? 'pass' : 'fail'} (p95 ${w.p95Ms} ms)`).join(', ') || 'no window measured'}`);
+  process.exitCode = summary.ok ? 0 : 1;
+}
+
+/** One window: the scene in a page of size win, measured and checked; writes <out>/perf.json. */
+async function measure(browser, server, o, win, out, display) {
+  fs.mkdirSync(path.join(out, 'perf-check'), { recursive: true });
+  const tag = `${win.width}x${win.height}`;
+  console.log(`[perf-check] window ${tag}`);
+  const result = { ok: false, budgetMs: o.budget, window: win, display, warmupS: o.warmup, recordS: o.seconds, error: null, consoleErrors: [], pageErrors: [] };
+  let context = null;
+  try {
+    context = await browser.newContext({ viewport: win, deviceScaleFactor: 1 });
+    const page = await context.newPage();
+    page.on('console', (m) => { if (m.type() === 'error') result.consoleErrors.push(m.text()); });
+    page.on('pageerror', (e) => result.pageErrors.push(String(e?.stack || e)));
 
     // ---- the scene
     const t0 = Date.now();
@@ -146,7 +181,7 @@ async function main() {
     if (failed.length) throw new Error(`perf scene incomplete: ${failed.map((a) => a.msg).join('; ')}`);
     result.scene = { setupS: (Date.now() - t0) / 1000, logs: scen.logs, view: scen.view, dpr: scen.dpr, inner: scen.inner, creatureArt: await page.evaluate(() => window.__perf.creatureArt ?? 'unknown') };
     console.log(`[perf-check] creature art in the scene: ${result.scene.creatureArt}`);
-    if (scen.dpr !== 1 || scen.inner[0] !== o.width || scen.inner[1] !== o.height) throw new Error(`page is ${scen.inner.join('x')} at DPR ${scen.dpr}, want ${o.width}x${o.height} at 1`);
+    if (scen.dpr !== 1 || scen.inner[0] !== win.width || scen.inner[1] !== win.height) throw new Error(`page is ${scen.inner.join('x')} at DPR ${scen.dpr}, want ${win.width}x${win.height} at 1`);
     console.log(`[perf-check] scene ready after ${result.scene.setupS.toFixed(1)} s; view ${scen.view?.w}x${scen.view?.h} at scale ${scen.view?.scale}; warming up ${o.warmup} s`);
     await page.waitForTimeout(o.warmup * 1000);
 
@@ -217,9 +252,7 @@ async function main() {
     result.error = String(err?.stack || err);
     result.ok = false;
   } finally {
-    if (browser) await browser.close().catch((e) => console.warn(`[perf-check] browser close: ${e.message}`));
-    if (server) await server.close();
-    fs.rmSync(buildDir, { recursive: true, force: true });
+    if (context) await context.close().catch((e) => console.warn(`[perf-check] context close: ${e.message}`));
   }
   fs.writeFileSync(path.join(out, 'perf.json'), JSON.stringify(result, null, 2));
 
@@ -238,9 +271,8 @@ async function main() {
   }
   for (const e of [...result.consoleErrors, ...result.pageErrors]) console.log(`  ERROR ${e}`);
   if (result.error) console.log(`  ERROR ${result.error}`);
-  console.log(`[perf-check] perf.json in ${out}`);
-  console.log(result.ok ? `[perf-check] PASS (p95 ${result.frames.p95Ms} ms <= ${o.budget} ms)` : `[perf-check] FAIL${result.frames ? ` (p95 ${result.frames.p95Ms} ms, budget ${o.budget} ms${result.endCheck?.ok === false ? '; end-of-window check failed' : ''})` : ''}`);
-  process.exitCode = result.ok ? 0 : 1;
+  console.log(result.ok ? `[perf-check] ${tag}: PASS (p95 ${result.frames.p95Ms} ms <= ${o.budget} ms)` : `[perf-check] ${tag}: FAIL${result.frames ? ` (p95 ${result.frames.p95Ms} ms, budget ${o.budget} ms${result.endCheck?.ok === false ? '; end-of-window check failed' : ''})` : ''}`);
+  return result;
 }
 
 main().catch((err) => {
