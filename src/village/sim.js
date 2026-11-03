@@ -668,6 +668,10 @@ export function createVillageSim(game) {
     return n;
   }
 
+  /** Ore lying loose within workRadius of village `vill`'s centre that a villager may take. */
+  const looseOre = (vill) => world.query({ kind: 'ore', x: vill.cx, y: vill.cy, r: T.workRadius })
+    .filter((it) => grounded(it) && !it.carriedBy && paths.walkable(Math.floor(it.x), Math.floor(it.y)));
+
   /** Usable stores of `owner` with room for `kind`. */
   const storesFor = (owner, kind) => own(owner, 'store').filter((b) => usable(b) && storeRoom(b, kind) >= 1);
 
@@ -822,7 +826,10 @@ export function createVillageSim(game) {
           mine = nearest(own(v.owner, 'mine').filter((b) => usable(b) && b.ore >= 1 && !bad(v, b.id)), v.x, v.y);
         }
         if (!canTake(v.owner, 'ore')) { v.target = null; v.wait = 3; v.pose = 'idle'; return; }
-        const loose = looseNear(v, 'ore'); // salvage from a store wreck, a pile the hand left
+        // Loose ore (salvage from a store wreck, a pile the hand left) is fetched before digging: the
+        // nearest one in reach, else any in the village (miners are dealt for it even once the mine is
+        // worked out).
+        const loose = looseNear(v, 'ore') ?? nearest(looseOre(vill).filter((it) => !bad(v, it.id)), v.x, v.y);
         if (loose) { if (goto(v, tileOf(loose), loose.id)) pickUp(v, loose); return; }
         if (!mine) { v.target = null; v.wait = 3; v.pose = 'idle'; return; }
         v.target = mine.id;
@@ -909,7 +916,9 @@ export function createVillageSim(game) {
     const onTile = (e) => Math.floor(e.x) === tx && Math.floor(e.y) === ty;
     const trees = world.query({ kind: 'tree', x, y, r: 1.6 });
     if (trees.length > T.spreadCrowd || trees.some(onTile)) return false;
-    if (world.query({ kind: 'rock', x, y, r: 1 }).some(onTile)) return false;
+    // From the tile's centre: a rock anywhere on the tile is within 0.71 of it (from the point itself,
+    // a rock in the opposite corner can be 1.4 away).
+    if (world.query({ kind: 'rock', x: tx + 0.5, y: ty + 0.5, r: 0.75 }).some(onTile)) return false;
     for (const b of world.query({ kind: 'building', x, y, r: T.spreadClear + 3 })) if (rectDist(b, x, y) <= T.spreadClear) return false;
     return true;
   }
@@ -983,12 +992,14 @@ export function createVillageSim(game) {
     const wood = own(vill.owner, 'store').reduce((s, b) => s + (usable(b) ? b.wood : 0), 0);
     const grain = grainOf(vill.owner);
     const store = canTake(vill.owner, 'grain');
-    // Miners only while a mine still holds ore, a store has room for it and the stock is under
+    // Miners dig only while a mine still holds ore, a store has room for it and the stock is under
     // oreTarget: nothing spends ore yet (step 8), so they never take hands from food or wood beyond
-    // a small share.
+    // a small share. Loose ore lying in the village (a store wreck's salvage, a pile the hand left)
+    // gets one miner to bring it in, mine or no mine.
     const mines = own(vill.owner, 'mine').filter((b) => usable(b) && b.ore >= 1).length;
-    const miners = mines && canTake(vill.owner, 'ore') && stockOf(vill.owner, 'ore') < T.oreTarget
-      ? Math.min(mines * T.minersPerMine, Math.max(1, Math.round(n * T.mineShare))) : 0;
+    const oreRoom = canTake(vill.owner, 'ore');
+    const miners = !oreRoom ? 0 : mines && stockOf(vill.owner, 'ore') < T.oreTarget
+      ? Math.min(mines * T.minersPerMine, Math.max(1, Math.round(n * T.mineShare))) : looseOre(vill).length ? 1 : 0;
     const share = vill.owner === 'player' ? T.worshipShare : T.rivalWorshipShare;
     // With nowhere to put wood (no store with room, no blueprint short of it) cutting is wasted:
     // everyone free builds, so the sites that hold their wood (a store among them) get finished.
@@ -1413,6 +1424,8 @@ export function createVillageSim(game) {
   const api = {
     setup, update, placeBlueprint, validate, stats, lastReason: null,
     buildingAt, handSource, handTake, handSink, handPut, canGodBuild, godBuild,
+    /** True when a sapling could take root at (x, y) now (the spread's and rain's test). */
+    seedable: (x, y) => !!mapRef && seedable(x, y),
     get ready() { return mapRef !== null && mapRef === world.height; },
     get time() { return time; },
     village(owner) { return villages[owner]; },

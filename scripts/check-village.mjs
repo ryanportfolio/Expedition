@@ -1305,6 +1305,14 @@ for (const kind of ['wood', 'grain']) for (const seed of [1, 2]) {
   const s = vs.stats().player;
   check(mine.ore === 0 && empties === 1 && s.ore === 250 && s.jobs.miner === 0,
     `a mine worked out: ore ${mine.ore} left, ${empties} mine-empty event, all 250 in the store (${s.ore}), ${s.jobs.miner} miners after`);
+  // Loose ore in the village is still brought in once the mine is worked out (Codex review, PR #9:
+  // only miners take loose ore, and none were dealt without ore in a mine).
+  const store = buildings(game, 'player', 'store').find((b) => b.stage === 'done');
+  const at = { x: store.x + 3, y: store.y + 2 };
+  const pile = world.spawn('ore', { x: at.x, y: at.y, z: world.heightAt(at.x, at.y), vx: 0, vy: 0, vz: 0, amount: 250, grabbable: true, carriedBy: null, madeBy: 'village' });
+  const o0 = vs.stats().player.ore;
+  game.clock.run(2 * MIN, game.tick);
+  check(!world.get(pile.id) && vs.stats().player.ore === o0 + 250, `with the mine worked out, a 250-ore pile in the village is carried to the store (${world.get(pile.id) ? 'still lying' : 'taken'}, store ${o0} -> ${vs.stats().player.ore})`);
 }
 {
   // The store's cap: grain beyond storeCap is not taken in, and with every store full of grain no one
@@ -1379,6 +1387,20 @@ function forestRun(seed) {
   check(spread.length >= 10 && a.most <= a.cap, `forests spread back: ${spread.length} saplings seeded in 6 minutes after 60 trees were cleared, never more than the ${a.cap} the island started with (most ${a.most})`);
   check(a.bad.length === 0, `seeded saplings stand on grass, clear of buildings${a.bad.length ? ` (${a.bad.slice(0, 5).join(' ')})` : ''}`);
   check(a.trees === b.trees && a.stats === b.stats, 'the same seed replays the same forests, stocks and jobs');
+}
+{
+  // A rock anywhere on a tile keeps saplings off it, wherever on the tile the seed lands (Codex
+  // review, PR #9: from a corner point the old radius-1 search missed a rock in the opposite corner).
+  const game = newGame(1);
+  const vs = game.systems.village, { world } = game;
+  let tile = null;
+  for (let ty = 20; ty < W - 20 && !tile; ty++) for (let tx = 20; tx < W - 20 && !tile; tx++)
+    if (vs.sim.seedable(tx + 0.5, ty + 0.5) && vs.sim.seedable(tx + 0.01, ty + 0.01)) tile = { tx, ty };
+  const rock = world.spawn('rock', { x: tile.tx + 0.99, y: tile.ty + 0.99, vx: 0, vy: 0, vz: 0, size: 1, grabbable: true, hp: 1 });
+  check(!vs.sim.seedable(tile.tx + 0.01, tile.ty + 0.01) && !vs.sim.seedable(tile.tx + 0.5, tile.ty + 0.5),
+    `no sapling on a tile with a rock in its far corner (tile ${tile.tx},${tile.ty}, rock at +0.99)`);
+  world.remove(rock.id);
+  check(vs.sim.seedable(tile.tx + 0.01, tile.ty + 0.01), 'the same tile takes a sapling once the rock is gone');
 }
 {
   // Rain seeds saplings on free grass under the cloud, and the rain miracle grows them.
