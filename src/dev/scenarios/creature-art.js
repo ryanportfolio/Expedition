@@ -6,7 +6,7 @@
 // ('seat') creature side by side, and idle at lean +1 / -1 with the good / evil LUTs. Every strip
 // stands on ground cleared of houses, villagers, trees and rocks, and asserts nothing covers it. Asserts the painter's contract: 13 poses, frame counts, sizes, anchors per
 // ground contact ('feet' or 'seat', exported on every sprite as `contact`), mirrors, lean.
-import { buildIsland } from '../../world/island.js';
+import { buildIsland, SCALE } from '../../world/island.js';
 import { debugTerrainPass } from '../test-art.js';
 import { makeLut } from '../../art/lut.js';
 import { getSprite, placeholderSprite } from '../../art/registry.js';
@@ -36,7 +36,7 @@ export default async function creatureArt(t, game) {
   const ROW = Array.from({ length: Math.round(half / 0.75) * 2 + 1 }, (_, i) => -half + 0.75 * i);
   const clear = (x, y) => ROW.every((j) => clearOne(x + j, y - j));
   let spot = null;
-  for (let r = 3; r <= 24 && !spot; r++)
+  for (let r = 3; r <= 24 * SCALE && !spot; r++) // the island is SCALE times the 64 x 64 it was laid out on
     for (let dy = -r; dy <= r && !spot; dy++)
       for (let dx = -r; dx <= r && !spot; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;

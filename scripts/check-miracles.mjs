@@ -15,6 +15,11 @@ import { buildIsland } from '../src/world/island.js';
 import { runMiracleSuite } from '../src/miracles/testbed.js';
 import { TUNING } from '../src/miracles/tuning.js';
 
+// Spots below are written round the player village's 64 x 64 centre (20, 40); OX, OY move them to
+// where the village stands on the island now.
+const { village: V0 } = buildIsland().sites;
+const OX = V0.x - 20, OY = V0.y - 40;
+
 registerPainters(testPattern);
 
 const results = [];
@@ -58,16 +63,16 @@ function fireRun(seed, { rainAt = null } = {}) {
   game.state.power = 0;
   const row = [];
   for (let i = 0; i < 8; i++) {
-    row.push(game.world.spawn('building', { x: 16 + i * 1.2, y: 40.5, vx: 0, vy: 0, vz: 0, hp: 1, flammable: true }));
+    row.push(game.world.spawn('building', { x: OX + 16 + i * 1.2, y: OY + 40.5, vx: 0, vy: 0, vz: 0, hp: 1, flammable: true }));
   }
   const M = game.systems.miracles;
-  M.cast('fire', 16, 40.5, { free: true });
+  M.cast('fire', OX + 16, OY + 40.5, { free: true });
   const t = nodeT(game);
   const sig = [];
   let afterRain = null;
   for (let k = 0; k < 40; k++) {
     if (rainAt !== null && k === rainAt) {
-      M.cast('rain', 20, 40.5, { free: true });
+      M.cast('rain', OX + 20, OY + 40.5, { free: true });
       afterRain = k;
     }
     t.step(0.5);
@@ -90,12 +95,12 @@ function fireRun(seed, { rainAt = null } = {}) {
   game.world.loadMap(buildIsland());
   game.state.power = 0;
   const row = [];
-  for (let i = 0; i < 5; i++) row.push(game.world.spawn('building', { x: 18 + i * 1.2, y: 40.5, vx: 0, vy: 0, vz: 0, hp: 1, flammable: true }));
+  for (let i = 0; i < 5; i++) row.push(game.world.spawn('building', { x: OX + 18 + i * 1.2, y: OY + 40.5, vx: 0, vy: 0, vz: 0, hp: 1, flammable: true }));
   const M = game.systems.miracles, t = nodeT(game);
   for (const e of row) M.ignite(e, 1);
   t.step(1);
   assert(row.every((e) => e.burning > 0), 'test row burns before the rain');
-  M.cast('rain', 20.4, 40.5, { free: true });
+  M.cast('rain', OX + 20.4, OY + 40.5, { free: true });
   t.step(T.extinguishTime + 0.1);
   assert(row.every((e) => e.burning === 0), `rain puts out every fire in range within ${T.extinguishTime} s (${row.map((e) => e.burning.toFixed(2))})`);
   assert(row.every((e) => !M.fire.states.has(e.id)), 'no fire state or flame effect left on the doused houses');
@@ -111,8 +116,8 @@ function fireRun(seed, { rainAt = null } = {}) {
 {
   const game = watch(createGame({ seed: 2 }));
   game.world.loadMap(buildIsland());
-  const tree = game.world.spawn('tree', { x: 20.5, y: 40.5, vx: 0, vy: 0, vz: 0, hp: 0.3, flammable: true, growth: 1 });
-  const house = game.world.spawn('building', { x: 30.5, y: 30.5, vx: 0, vy: 0, vz: 0, hp: 0.3, flammable: true });
+  const tree = game.world.spawn('tree', { x: OX + 20.5, y: OY + 40.5, vx: 0, vy: 0, vz: 0, hp: 0.3, flammable: true, growth: 1 });
+  const house = game.world.spawn('building', { x: OX + 30.5, y: OY + 30.5, vx: 0, vy: 0, vz: 0, hp: 0.3, flammable: true });
   const M = game.systems.miracles, t = nodeT(game);
   M.ignite(tree, 1);
   M.ignite(house, 1);

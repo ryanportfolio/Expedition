@@ -50,6 +50,10 @@ export default async function ui(t, game) {
   st.screen = 'play';
 
   t.step(6); // the creature picks and starts a few actions
+  // and finishes one, so the stroke below has an act to credit (how long the first takes depends on
+  // what stands round the creature's start)
+  for (let i = 0; i < 30 && !cs.brain.serialize().recent.length; i++) t.step(1);
+  t.assert(cs.brain.serialize().recent.length > 0, 'the creature has finished an act');
   follow();
 
   const setState = () => {

@@ -80,7 +80,8 @@ export default async function build(t, game) {
   };
   const onDrawn = (got) => got && got.drawn && got.drawn.tx === got.tx && got.drawn.ty === got.ty;
 
-  // invalid: the water tile nearest the village, the camera between the two
+  // invalid: the water tile nearest the village, the camera between the two (no more than 4 tiles
+  // off the water, so the ghost on it stays in view: the shore is far from the village on the island)
   const waters = [];
   for (let ty = 1; ty < world.h - 1; ty++) for (let tx = 1; tx < world.w - 1; tx++) {
     if (world.tile(tx, ty).ground <= 1) waters.push({ tx, ty, d: Math.hypot(tx + 0.5 - site.x, ty + 0.5 - site.y) });
@@ -89,7 +90,8 @@ export default async function build(t, game) {
   let water = null;
   for (const w of waters.slice(0, 40)) {
     if (w.d < 4) continue; // leave room for the ghost between the village and the shore
-    const got = aim(w.tx, w.ty, (w.tx + 0.5 + site.x) / 2, (w.ty + 0.5 + site.y) / 2);
+    const k = Math.min(0.5, 4 / w.d);
+    const got = aim(w.tx, w.ty, w.tx + 0.5 + (site.x - w.tx - 0.5) * k, w.ty + 0.5 + (site.y - w.ty - 0.5) * k);
     if (got && world.tile(got.tx, got.ty).ground <= 1) { water = got; break; }
   }
   t.assert(!!water, `the pointer is over water near the village (${JSON.stringify(water)})`);

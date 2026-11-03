@@ -56,6 +56,18 @@ function distanceToLand(world) {
   return d;
 }
 
+/** What painting any part of the cache needs from the world's current map, worked out once. */
+function prepare(world) {
+  const MW = world.w, MH = world.h;
+  const surf = surfaceHeights(world);
+  let maxS = 0;
+  for (let i = 0; i < surf.length; i++) if (surf[i] > maxS) maxS = surf[i];
+  return {
+    MW, MH, H: world.height, G: world.ground, surf, maxS, dist: distanceToLand(world),
+    ox: -MH * 16, oy: -maxS * 8, cw: (MW + MH) * 16, ch: (MW + MH) * 8 + maxS * 8,
+  };
+}
+
 /**
  * Builds the cache for the world's current map.
  * Returns { data: Uint8Array(w*h) of palette indices (0 = nothing), w, h, ox, oy, mapW, mapH,
@@ -63,32 +75,92 @@ function distanceToLand(world) {
  * `ground` are the world arrays the cache was built from (identity marks the map version).
  * opts.owner = true also fills `owner`: Int32Array, per pixel (tileIndex + 1) * 4 + PART (final
  * pixels), and `faces`: Int32Array(w*h*2), side-face pixels each tile wrote [left, right] (before
- * nearer tiles cover any of them). Checks use both; the game never asks for them.
+ * nearer tiles cover any of them). Checks use both; the game draws from createTerrainChunks, whose
+ * chunks hold the same bytes.
  */
 export function buildTerrainCache(world, { owner: wantOwner = false } = {}) {
-  const MW = world.w, MH = world.h, H = world.height, G = world.ground;
-  const surf = surfaceHeights(world);
-  let maxS = 0;
-  for (let i = 0; i < surf.length; i++) if (surf[i] > maxS) maxS = surf[i];
-  const ox = -MH * 16, oy = -maxS * 8;
-  const cw = (MW + MH) * 16, ch = (MW + MH) * 8 + maxS * 8;
+  const P = prepare(world), { cw, ch } = P;
   const data = new Uint8Array(cw * ch);
   const owner = wantOwner ? new Int32Array(cw * ch) : null;
-  const faces = wantOwner ? new Int32Array(MW * MH * 2) : null;
-  const dist = distanceToLand(world);
+  const faces = wantOwner ? new Int32Array(P.MW * P.MH * 2) : null;
+  paintRegion(P, data, 0, 0, cw, ch, owner, faces);
+  return { data, w: cw, h: ch, ox: P.ox, oy: P.oy, mapW: P.MW, mapH: P.MH, surf: P.surf, height: P.H, ground: P.G, owner, faces };
+}
+
+/** Cache px per chunk side. A chunk paints in about a millisecond; a 640 x 360 view spans about 24. */
+export const CHUNK = 128;
+/** Chunks kept painted at least (16 KB each); the least recently drawn go first. The pass raises the
+ * count (keep) to twice what a view and its prefetch ring touch, so a very large view never evicts
+ * chunks it is still drawing. */
+const CHUNKS_KEPT = 256;
+
+/**
+ * The cache in CHUNK x CHUNK pieces, painted on first use (step 2 of docs/gameplay-spec.md: the
+ * 192 x 192 island's whole cache took 0.6 s and 20 MB to build at load). Same fields as
+ * buildTerrainCache except `data`; chunk(ci, cj) returns the Uint8Array(CHUNK * CHUNK) for cache
+ * pixels [ci * CHUNK, +CHUNK) x [cj * CHUNK, +CHUNK), byte for byte what buildTerrainCache holds
+ * there (0 past the cache's edge), and at(x, y) one pixel. has(ci, cj) tells whether a chunk is
+ * painted; `built` counts chunks painted, `paintMs` their time.
+ */
+export function createTerrainChunks(world) {
+  const P = prepare(world);
+  const cols = Math.ceil(P.cw / CHUNK), rows = Math.ceil(P.ch / CHUNK);
+  const kept = new Map(); // ci + cj * cols -> chunk, least recently used first
+  const c = {
+    w: P.cw, h: P.ch, ox: P.ox, oy: P.oy, mapW: P.MW, mapH: P.MH, surf: P.surf, height: P.H, ground: P.G,
+    cols, rows, built: 0, paintMs: 0, keep: CHUNKS_KEPT,
+    has(ci, cj) { return kept.has(ci + cj * cols); },
+    /** The palette index at cache pixel (x, y) (0 outside the cache), painting its chunk if need be. */
+    at(x, y) {
+      if (x < 0 || y < 0 || x >= P.cw || y >= P.ch) return 0;
+      return c.chunk(Math.floor(x / CHUNK), Math.floor(y / CHUNK))[(y % CHUNK) * CHUNK + (x % CHUNK)];
+    },
+    chunk(ci, cj) {
+      const key = ci + cj * cols;
+      let d = kept.get(key);
+      if (d) { kept.delete(key); kept.set(key, d); return d; }
+      const t0 = performance.now();
+      d = new Uint8Array(CHUNK * CHUNK);
+      paintRegion(P, d, ci * CHUNK, cj * CHUNK, CHUNK, CHUNK, null, null);
+      c.paintMs += performance.now() - t0;
+      c.built++;
+      kept.set(key, d);
+      if (kept.size > c.keep) kept.delete(kept.keys().next().value);
+      return d;
+    },
+  };
+  return c;
+}
+
+/**
+ * Paints every tile that reaches cache pixels [rx0, rx0 + rw) x [ry0, ry0 + rh) into `out`
+ * (out[(y - ry0) * rw + (x - rx0)]), in the cache's painter order: tiles back to front (ascending
+ * tx + ty, then tx), nearer and higher tiles over what they hide. Pixels are worked out from their
+ * cache coordinates alone, so any region holds the bytes the whole cache holds there. owner and
+ * faces (whole-cache builds only) as in buildTerrainCache.
+ */
+function paintRegion(P, out, rx0, ry0, rw, rh, owner, faces) {
+  const { MW, MH, G, surf, maxS, dist, ox, oy } = P;
+  const rx1 = rx0 + rw, ry1 = ry0 + rh;
   const map = { w: MW, h: MH, ground: G, surf };
   const inMap = (x, y) => x >= 0 && y >= 0 && x < MW && y < MH;
   const at = (x, y) => (inMap(x, y) ? y * MW + x : -1);
   const distAt = (x, y) => dist[clamp(y, 0, MH - 1) * MW + clamp(x, 0, MW - 1)];
+  // A tile on diagonal s = tx + ty spans rows s*8 - S*8 - oy .. s*8 - oy + 15 at most (its side
+  // faces drop no lower than height 0) and columns d*16 - ox - 16 .. d*16 - ox + 15 for d = tx - ty.
+  const s0 = Math.max(0, Math.ceil((ry0 - 15 + oy) / 8)), s1 = Math.min(MW + MH - 2, Math.floor((ry1 - 1 + oy) / 8) + maxS);
+  const d0 = Math.ceil((rx0 - 15 + ox) / 16), d1 = Math.floor((rx1 + 15 + ox) / 16);
 
-  for (let s = 0; s <= MW + MH - 2; s++) {
-    for (let tx = Math.max(0, s - MH + 1); tx <= Math.min(s, MW - 1); tx++) {
+  for (let s = s0; s <= s1; s++) {
+    const t0 = Math.max(0, s - MH + 1, Math.ceil((s + d0) / 2)), t1 = Math.min(s, MW - 1, Math.floor((s + d1) / 2));
+    for (let tx = t0; tx <= t1; tx++) {
       const ty = s - tx, i = ty * MW + tx, S = surf[i], g0 = G[i];
       const cx = (tx - ty) * 16 - ox, cy = (tx + ty) * 8 - S * 8 - oy;
       // Neighbors: back-left (tx-1), back-right (ty-1), front-left (ty+1), front-right (tx+1).
       const nBL = at(tx - 1, ty), nBR = at(tx, ty - 1), nFL = at(tx, ty + 1), nFR = at(tx + 1, ty);
       const sBL = nBL >= 0 ? surf[nBL] : S, sBR = nBR >= 0 ? surf[nBR] : S;
       const dropL = nFL >= 0 ? S - surf[nFL] : 0, dropR = nFR >= 0 ? S - surf[nFR] : 0;
+      if (cy > ry1 - 1 || cy + 15 + Math.max(dropL, dropR, 0) * 8 < ry0) continue;
       const water = isWater(g0);
       // Land neighbors (8-way) for foam and wet sand: [index, kind, cu, cv]; kind 0 = edge u, 1 = edge v, 2 = corner.
       const shore = [];
@@ -103,8 +175,9 @@ export function buildTerrainCache(world, { owner: wantOwner = false } = {}) {
         // Rows whose pixel centers lie inside the diamond: k above and k below the center line,
         // so neighboring diamonds tile with no gap or overlap (same rule as sprite.js isoDiamond).
         const x = cx - 16 + c, k = c < 16 ? (c + 1) >> 1 : (32 - c) >> 1;
+        if (x < rx0 || x >= rx1) continue;
         const yTop = cy + 8 - k, yBot = cy + 7 + k;
-        for (let y = yTop; y <= yBot; y++) {
+        for (let y = Math.max(yTop, ry0), yEnd = Math.min(yBot, ry1 - 1); y <= yEnd; y++) {
           // Pixel center -> position on this tile (u along +x, v along +y), in [0, 1].
           const wsx = x + ox + 0.5, wsy = y + oy + 0.5 + S * 8;
           const d16 = wsx / 16, s8 = wsy / 8;
@@ -130,8 +203,8 @@ export function buildTerrainCache(world, { owner: wantOwner = false } = {}) {
             if (y === yBot && c < 16 && dropL > 0) shift++;
             if (shift) col = k.base + clamp(k.shade + shift, 1, 7);
           }
-          const o = y * cw + x;
-          data[o] = col;
+          const o = (y - ry0) * rw + x - rx0;
+          out[o] = col;
           if (owner) owner[o] = (i + 1) * 4 + PART.TOP;
         }
         // Side face below this column when the front neighbor on that side is lower.
@@ -139,15 +212,14 @@ export function buildTerrainCache(world, { owner: wantOwner = false } = {}) {
         if (drop <= 0) continue;
         const nIdx = left ? nFL : nFR, frontWater = isWater(G[nIdx]);
         const depth = drop * 8;
-        for (let d = 1; d <= depth; d++) {
-          const y = yBot + d, o = y * cw + x;
-          data[o] = facePixel(g0, left, x, d, depth, S * 8 - d, i, frontWater);
+        for (let d = Math.max(1, ry0 - yBot), dEnd = Math.min(depth, ry1 - 1 - yBot); d <= dEnd; d++) {
+          const y = yBot + d, o = (y - ry0) * rw + x - rx0;
+          out[o] = facePixel(g0, left, x, d, depth, S * 8 - d, i, frontWater);
           if (owner) { owner[o] = (i + 1) * 4 + (left ? PART.LEFT : PART.RIGHT); faces[i * 2 + (left ? 0 : 1)]++; }
         }
       }
     }
   }
-  return { data, w: cw, h: ch, ox, oy, mapW: MW, mapH: MH, surf, height: H, ground: G, owner, faces };
 }
 
 function rampShift(col) {

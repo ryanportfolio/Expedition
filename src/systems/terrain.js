@@ -1,7 +1,10 @@
 // terrain system: owns the map's look. On create it loads the island when the world has no map,
 // spawns one rock entity per map rock (unless rock entities exist) and registers a terrain pass
-// that draws every tile from a cached palette-index buffer (src/terrain/). The cache is rebuilt
-// when the world's map changes (world.loadMap swaps the height and ground arrays).
+// that draws every tile from a cached palette-index buffer (src/terrain/), kept in chunks painted
+// the first time the view reaches them (createTerrainChunks); a frame that paints no chunk the view
+// needs paints one in the ring round the view instead, so a camera pan finds the next ones ready.
+// The cache is rebuilt when the world's map changes (world.loadMap swaps the height and ground
+// arrays).
 // Rocks per map: world.loadMap clears every entity and swaps world.rocks for a new array, so on the
 // first update() or terrain pass after a map change the system spawns the new map's rocks again,
 // through the same spawnRocks as at create: one per map rock, none when rock entities already exist
@@ -18,8 +21,8 @@
 import { buildIsland } from '../world/island.js';
 import { getSprite } from '../art/registry.js';
 import { makeLut } from '../art/lut.js';
-import { buildTerrainCache } from '../terrain/cache.js';
-import { drawTerrain } from '../terrain/pass.js';
+import { createTerrainChunks } from '../terrain/cache.js';
+import { drawTerrain, prefetchTerrain } from '../terrain/pass.js';
 
 /** True when the world holds a map: a fresh world is all zero with no sites, trees or rocks. */
 export function hasMap(world) {
@@ -74,22 +77,26 @@ export function create(game) {
   if (renderer && renderer.lut.every((v) => v === 0)) renderer.lut = makeLut(0);
 
   let cache = null;
-  const stats = { builds: 0, buildMs: 0, passMs: [], lastMs: 0 };
+  // builds: caches made (one per map); buildMs: the last one's setup (surface heights, distance to
+  // land); chunks, paintMs: chunks painted on the current map and their time.
+  const stats = { builds: 0, buildMs: 0, chunks: 0, paintMs: 0, passMs: [], lastMs: 0 };
   const current = () => {
     if (!cache || cache.height !== world.height || cache.ground !== world.ground || cache.mapW !== world.w || cache.mapH !== world.h) {
       const t0 = performance.now();
-      cache = buildTerrainCache(world);
+      cache = createTerrainChunks(world);
       stats.buildMs = performance.now() - t0;
       stats.builds++;
     }
     return cache;
   };
-  // Timed per frame: the window copy only; the one-time cache build is reported in stats.buildMs.
+  // Timed per frame: the window copy and any chunks painted for it (and the one prefetched).
   const pass = (ctx) => {
     syncRocks(); // before the renderer collects entity sprites, so a new map's rocks show at once
     const c = current();
     const t0 = performance.now();
-    drawTerrain(ctx, c, game.clock.time);
+    if (!drawTerrain(ctx, c, game.clock.time)) prefetchTerrain(ctx, c, 1);
+    stats.chunks = c.built;
+    stats.paintMs = c.paintMs;
     stats.lastMs = performance.now() - t0;
     stats.passMs.push(stats.lastMs);
     if (stats.passMs.length > SAMPLES) stats.passMs.shift();

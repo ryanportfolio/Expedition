@@ -376,7 +376,10 @@ section('game', () => {
   input.synth.keyUp('KeyW');
   ok(near(camera.y, camera.bounds().minY), `camera clamps at the north bound (${camera.y})`);
 
-  // input: drag events and velocity in sim time
+  // input: drag events and velocity in sim time. A sample stamped far ahead on another clock comes
+  // first: switching input.now to sim time must not mix it into the velocity window.
+  input.now = () => 1e9;
+  game.tick(STEP);
   input.now = () => game.clock.time * 1000;
   const seen = [];
   game.events.on('drag-start', () => seen.push('start'));

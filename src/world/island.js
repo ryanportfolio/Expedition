@@ -8,15 +8,27 @@
 // floor and imul (no sin/cos/exp/pow, whose last bits may differ between
 // engines), so node checks and every browser build the same bytes.
 //
-// Coordinates: tile (x, y), index y * 64 + x. On screen x runs down-right and y
+// Coordinates: tile (x, y), index y * W + x. On screen x runs down-right and y
 // runs down-left, so low x + y is the back (top) of the view.
+//
+// Scale (step 2 of docs/gameplay-spec.md): the island's shapes were authored on a 64 x 64 grid and
+// are drawn here SCALE times larger, so the island has room for towns of hundreds of villagers and
+// later for several rival towns. Two kinds of layout data:
+// - island-scale shapes (outline, headlands, cove, ridge, outcrops, hills, road, wild forests,
+//   beaches, boulder fields) keep their 64-grid numbers and are multiplied by SCALE (L());
+// - town-scale features (temples, the creature's start, village plateaus, the forests the
+//   villagers cut, the temple knoll) are tile offsets from their village centre, because the
+//   village sim measures its reach in tiles (workRadius, influenceR) and does not scale with the map.
+// Slopes and falloffs that were per tile on the 64 grid are divided by SCALE; noise that only
+// roughens edges and surfaces stays in tiles.
 
-const W = 64;
-const H = 64;
+export const SCALE = 3;
+const W = 64 * SCALE;
+const H = 64 * SCALE;
 const N = W * H;
 const SEA = 2;
 const MAX_H = 12;
-const BORDER = 4; // tiles with min(x, y, 63 - x, 63 - y) <= BORDER stay water
+const BORDER = 4; // tiles with min(x, y, W - 1 - x, H - 1 - y) <= BORDER stay water
 const DEEP_H = 1;
 const SHALLOW_H = SEA;
 
@@ -31,17 +43,30 @@ const G_ROCK = 5;
 // Authored layout
 // ---------------------------------------------------------------------------
 
+/** Island-scale shape from 64-grid numbers: x, y and r (and any `keys`) times SCALE. */
+const L = (o, keys = []) => {
+  const out = { ...o, x: o.x * SCALE, y: o.y * SCALE };
+  if (o.r !== undefined) out.r = o.r * SCALE;
+  for (const k of keys) out[k] = o[k] * SCALE;
+  return out;
+};
+/** Polyline points [x, y, width?, ...rest]: x, y and the first `n` extras times SCALE. */
+const LP = (pts, n = 0) => pts.map((p) => p.map((v, k) => (k < 2 + n ? v * SCALE : v)));
+
 // Player village on a broad plateau on the west side; temple on a knoll behind it.
-const VILLAGE = { x: 20, y: 40, r: 7, floor: 5 };
-const TEMPLE = { x: 14, y: 35, top: 7 };
-const CREATURE_START = { x: 26, y: 46 };
+const VILLAGE = { x: 20 * SCALE, y: 40 * SCALE, r: 7, floor: 5 };
+const TEMPLE = { x: VILLAGE.x - 6, y: VILLAGE.y - 5, top: 7 };
+const CREATURE_START = { x: VILLAGE.x + 6, y: VILLAGE.y + 6 };
 
 // Neutral rival village across the island on a higher eastern plateau.
-const RIVAL = { x: 45, y: 20, r: 7, floor: 6 };
-const RIVAL_TEMPLE = { x: 47, y: 18 };
+const RIVAL = { x: 45 * SCALE, y: 20 * SCALE, r: 7, floor: 6 };
+const RIVAL_TEMPLE = { x: RIVAL.x + 2, y: RIVAL.y - 2 };
+
+/** Town-scale feature `dx, dy` tiles from village `v`. */
+const near = (v, dx, dy, rest) => ({ x: v.x + dx, y: v.y + dy, ...rest });
 
 // Island outline: a round-cornered core, reshaped by named headlands and bays.
-const OUTLINE = { cx: 32, cy: 32, ax: 22.5, ay: 22.5 };
+const OUTLINE = { cx: 32 * SCALE, cy: 32 * SCALE, ax: 22.5 * SCALE, ay: 22.5 * SCALE };
 const SHORE_BLOBS = [
   { name: 'Gull Head', x: 10, y: 10, r: 8, amp: 0.7 }, // north-west headland under the ridge
   { name: 'Rookery Point', x: 40, y: 6, r: 7, amp: 0.5 }, // north shore
@@ -54,50 +79,56 @@ const SHORE_BLOBS = [
   { name: 'North Reach', x: 62, y: 2, r: 10, amp: -1.0 }, // north-east corner cut
   { name: 'Back Shoal', x: 26, y: 2, r: 6, amp: -0.6 }, // dent in the north shore
   { name: 'Eastern Sound', x: 61, y: 25, r: 6, amp: -0.6 }, // between the rival lobe and the cape
-];
+].map((b) => L(b));
 
 // A narrow cove cut in from the south-east corner. [x, y, radius].
-const COVE = { name: 'Quiet Cove', pts: [[63, 63, 6.0], [55, 55, 4.0], [49, 50, 3.0], [44, 46, 2.2], [41, 45, 1.2]] };
+const COVE = { name: 'Quiet Cove', pts: LP([[63, 63, 6.0], [55, 55, 4.0], [49, 50, 3.0], [44, 46, 2.2], [41, 45, 1.2]], 1) };
 
 // Rock ridge across the back of the island. [x, y, half-width, crest height].
 const RIDGES = [
-  { name: 'Greyspine', pts: [[12, 24, 2.0, 8], [17, 17, 3.4, 12], [24, 12, 3.0, 11], [31, 10, 2.0, 8]] },
+  { name: 'Greyspine', pts: LP([[12, 24, 2.0, 8], [17, 17, 3.4, 12], [24, 12, 3.0, 11], [31, 10, 2.0, 8]], 1) },
 ];
 
 // Small rocky knolls: cliffs in the middle of the island and a near rock source.
 const OUTCROPS = [
   { name: 'Watch Crag', x: 36, y: 41, r: 2.4, crest: 8 },
   { name: 'Saltstone', x: 51, y: 31, r: 1.9, crest: 8 },
-];
+].map((o) => L(o));
 
 // Rolling hills added to the walkable surface (amp in height units).
 const HILLS = [
-  { name: 'Midsummer Downs', x: 32, y: 27, r: 9, amp: 3.0 },
-  { name: 'Hearth Knoll', x: 14, y: 35, r: 4.5, amp: 3.0 }, // the temple hill
-  { name: 'Southrise', x: 33, y: 49, r: 7, amp: 2.0 },
-  { name: 'Eastfold', x: 53, y: 30, r: 6, amp: 2.0 },
-  { name: 'Gull Rise', x: 10, y: 15, r: 5, amp: 1.5 },
-  { name: 'Mill Hollow', x: 29, y: 39, r: 6, amp: -2.0 }, // low meadow between the village and the downs
-  { name: 'Fernbottom', x: 42, y: 33, r: 5, amp: -1.5 },
+  ...[
+    { name: 'Midsummer Downs', x: 32, y: 27, r: 9, amp: 3.0 },
+    { name: 'Southrise', x: 33, y: 49, r: 7, amp: 2.0 },
+    { name: 'Eastfold', x: 53, y: 30, r: 6, amp: 2.0 },
+    { name: 'Gull Rise', x: 10, y: 15, r: 5, amp: 1.5 },
+    { name: 'Mill Hollow', x: 29, y: 39, r: 6, amp: -2.0 }, // low meadow between the village and the downs
+    { name: 'Fernbottom', x: 42, y: 33, r: 5, amp: -1.5 },
+  ].map((h) => L(h)),
+  { name: 'Hearth Knoll', x: TEMPLE.x, y: TEMPLE.y, r: 4.5, amp: 3.0 }, // the temple hill
 ];
 
 // Dirt road from the player village over the downs to the rival village.
-const ROAD = [[20, 40], [26, 37], [31, 32], [37, 27], [41, 23], [45, 20]];
+const ROAD = LP([[20, 40], [26, 37], [31, 32], [37, 27], [41, 23], [45, 20]]);
 
 // Forests: density is the tree chance at the centre, falling to 0 at r.
 // pine = share of pines (more pines high up).
+// The villages' woods are town-scale (tile offsets from their village, within the woodcutters'
+// workRadius); the wild forests between them are island-scale.
 const FORESTS = [
-  { name: 'Hearthwood', x: 18, y: 29, r: 6, density: 0.85, pine: 0.2 }, // behind the player village
-  { name: 'Templewood', x: 10, y: 31, r: 4, density: 0.8, pine: 0.3 }, // behind the temple knoll
-  { name: 'Bluffwood', x: 9, y: 40, r: 4, density: 0.8, pine: 0.15 }, // between the village and the west shore
-  { name: 'Meadow End', x: 23, y: 51, r: 4.5, density: 0.8, pine: 0.1 }, // below the village, front of the view
-  { name: 'Kindling Copse', x: 30, y: 46, r: 4, density: 0.75, pine: 0.1 },
-  { name: 'Ridgefoot Pines', x: 26, y: 21, r: 5.5, density: 0.75, pine: 0.85 },
-  { name: 'Rookery Wood', x: 39, y: 10, r: 4.5, density: 0.8, pine: 0.5 },
-  { name: 'Westerholt', x: 34, y: 17, r: 5, density: 0.8, pine: 0.3 }, // west of the rival village
-  { name: 'Brackenwood', x: 51, y: 27, r: 5.5, density: 0.85, pine: 0.35 }, // south-east of the rival village
-  { name: 'Lantern Grove', x: 50, y: 40, r: 4, density: 0.75, pine: 0.3 },
-  { name: 'Covewood', x: 36, y: 52, r: 5, density: 0.7, pine: 0.15 },
+  near(VILLAGE, -2, -11, { name: 'Hearthwood', r: 6, density: 0.85, pine: 0.2 }), // behind the player village
+  near(VILLAGE, -10, -9, { name: 'Templewood', r: 4, density: 0.8, pine: 0.3 }), // behind the temple knoll
+  near(VILLAGE, -11, 0, { name: 'Bluffwood', r: 4, density: 0.8, pine: 0.15 }), // west of the village
+  near(VILLAGE, 3, 11, { name: 'Meadow End', r: 4.5, density: 0.8, pine: 0.1 }), // below the village, front of the view
+  near(VILLAGE, 10, 6, { name: 'Kindling Copse', r: 4, density: 0.75, pine: 0.1 }),
+  near(RIVAL, -6, -10, { name: 'Rookery Wood', r: 4.5, density: 0.8, pine: 0.5 }), // north of the rival village
+  near(RIVAL, -11, -3, { name: 'Westerholt', r: 5, density: 0.8, pine: 0.3 }), // west of the rival village
+  near(RIVAL, 6, 7, { name: 'Brackenwood', r: 5.5, density: 0.85, pine: 0.35 }), // south-east of the rival village
+  ...[
+    { name: 'Ridgefoot Pines', x: 26, y: 21, r: 5.5, density: 0.75, pine: 0.85 },
+    { name: 'Lantern Grove', x: 50, y: 40, r: 4, density: 0.75, pine: 0.3 },
+    { name: 'Covewood', x: 36, y: 52, r: 5, density: 0.7, pine: 0.15 },
+  ].map((f) => L(f)),
 ];
 const SCATTER_TREES = 0.03;
 
@@ -107,7 +138,7 @@ const WIDE_BEACHES = [
   { name: 'Southrise Strand', x: 30, y: 56, r: 7 }, // south shore, front of the view
   { name: 'Cove Strand', x: 44, y: 46, r: 5 }, // head of Quiet Cove
   { name: 'Hearth Strand', x: 7, y: 45, r: 5 }, // west shore below the player village
-];
+].map((b) => L(b));
 
 // Loose rock objects: density is the chance at the centre, falling to 0 at r.
 // Tiles next to ridge or outcrop rock also get scree (ROCK_NEAR_CLIFF).
@@ -116,7 +147,7 @@ const BOULDER_FIELDS = [
   { name: 'Gull Head Stones', x: 12, y: 11, r: 3, density: 0.25 }, // north-west headland
   { name: 'Crag Rubble', x: 39, y: 43, r: 3, density: 0.4 }, // between Watch Crag and the cove
   { name: 'Saltstone Field', x: 53, y: 34, r: 3, density: 0.35 }, // below the east outcrop
-];
+].map((b) => L(b));
 const ROCK_NEAR_CLIFF = 0.3;
 const SCATTER_ROCKS = 0.004; // lone stones anywhere else
 
@@ -124,10 +155,10 @@ const SCATTER_ROCKS = 0.004; // lone stones anywhere else
 // does not show them on a grid. Below 0.5, so each stays on its own tile.
 const JITTER = 0.2;
 
-const MIN_TREES = 150;
+const MIN_TREES = 150 * SCALE * SCALE;
 const MIN_TREES_NEAR = 18; // per village, within NEAR_R (check needs 15)
 const NEAR_R = 12;
-const MIN_ROCKS = 24; // check needs 20
+const MIN_ROCKS = 24 * SCALE * SCALE; // check needs 20 per 64 x 64 of map
 
 // ---------------------------------------------------------------------------
 // Deterministic helpers
@@ -282,7 +313,7 @@ export function buildIsland() {
       const r4 = dx * dx * dx * dx + dy * dy * dy * dy;
       let f = 1 - (0.45 * r2 + 0.55 * r4); // between a circle and a rounded square
       for (const b of SHORE_BLOBS) f += b.amp * bump(x, y, b.x, b.y, b.r);
-      f += 0.16 * valueNoise(x, y, 7, SALT_COAST) + 0.07 * valueNoise(x, y, 3, SALT_COAST + 1);
+      f += 0.16 * valueNoise(x, y, 7 * SCALE, SALT_COAST) + 0.07 * valueNoise(x, y, 3, SALT_COAST + 1);
       const cove = nearestOnPolyline(x, y, COVE.pts);
       if (cove.d < cove.extra[0]) f = -1;
       if (f > 0) land[i] = 1;
@@ -319,14 +350,14 @@ export function buildIsland() {
       const w = ridgeInfo[i * 3 + 1] + 0.6 * jag;
       if (d < w) {
         rock[i] = 1;
-        rockTarget[i] = ridgeInfo[i * 3 + 2] - d * 1.1 + 0.4 * jag;
+        rockTarget[i] = ridgeInfo[i * 3 + 2] - (d * 1.1) / SCALE + 0.4 * jag;
         continue;
       }
       for (const o of OUTCROPS) {
         const od = Math.sqrt(dist2(x, y, o));
         if (od < o.r + 0.4 * jag) {
           rock[i] = 1;
-          rockTarget[i] = o.crest - od * 1.2;
+          rockTarget[i] = o.crest - (od * 1.2) / SCALE;
           break;
         }
       }
@@ -342,15 +373,15 @@ export function buildIsland() {
     for (let x = 0; x < W; x++) {
       const i = idx(x, y);
       if (!land[i] || rock[i]) continue;
-      let t = 3 + Math.min(dW[i] - 1, 6) * 0.4;
+      let t = 3 + (Math.min(dW[i] - 1, 6 * SCALE) * 0.4) / SCALE;
       for (const h of HILLS) t += h.amp * bump(x, y, h.x, h.y, h.r);
       const rd = ridgeInfo[i * 3];
       const rw = ridgeInfo[i * 3 + 1];
       const crest = ridgeInfo[i * 3 + 2];
-      const foot = crest * 0.55 - Math.max(0, rd - rw) * 0.7;
+      const foot = crest * 0.55 - (Math.max(0, rd - rw) * 0.7) / SCALE;
       if (foot > t) t = foot;
       for (const o of OUTCROPS) {
-        const of = o.crest * 0.6 - Math.max(0, Math.sqrt(dist2(x, y, o)) - o.r) * 0.8;
+        const of = o.crest * 0.6 - (Math.max(0, Math.sqrt(dist2(x, y, o)) - o.r) * 0.8) / SCALE;
         if (of > t) t = of;
       }
       t += 1.1 * valueNoise(x, y, 8, SALT_HEIGHT) + 0.3 * valueNoise(x, y, 4, SALT_HEIGHT + 1);

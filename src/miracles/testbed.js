@@ -5,15 +5,18 @@
 // way the hand will: it sets `held`, carries the orb, and moves it through a throw.
 //
 // t: { step(seconds), assert(cond, msg), log(...), shot?(name) async, focus?(x, y) }
-import { buildIsland } from '../world/island.js';
+import { buildIsland, SCALE } from '../world/island.js';
 import { getSprite } from '../art/registry.js';
 import { TUNING } from './tuning.js';
 
+// Written round the player village's 64 x 64 centre (20, 40); the island is drawn SCALE times larger
+// now (src/world/island.js), which moves the village to (20, 40) x SCALE.
+const OX = 20 * (SCALE - 1), OY = 40 * (SCALE - 1);
 export const SPOTS = {
-  fire: { x: 17.5, y: 40.5 },
-  rain: { x: 22.5, y: 37.0 },
-  heal: { x: 24.5, y: 43.5 },
-  lightning: { x: 17.0, y: 45.0 },
+  fire: { x: OX + 17.5, y: OY + 40.5 },
+  rain: { x: OX + 22.5, y: OY + 37.0 },
+  heal: { x: OX + 24.5, y: OY + 43.5 },
+  lightning: { x: OX + 17.0, y: OY + 45.0 },
 };
 
 /** Loads the island and places the test entities. Returns them by role. */

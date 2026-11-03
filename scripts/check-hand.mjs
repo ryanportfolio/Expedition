@@ -24,6 +24,10 @@ registerPainters({ sprites: { 'shadow-l': () => customShadow } });
 
 const { createGame } = await import('../src/game.js');
 const { buildIsland } = await import('../src/world/island.js');
+// Spots below are written as offsets from the player village's 64 x 64 centre (20, 40); OX, OY move
+// them to where the village stands on the island now.
+const { village: V0 } = buildIsland().sites;
+const OX = V0.x - 20, OY = V0.y - 40;
 const { HAND } = await import('../src/systems/hand.js');
 const { stepBody, apexHeight, flatRange, predictLanding } = await import('../src/hand/flight.js');
 const { createStrokeTracker } = await import('../src/hand/stroke.js');
@@ -173,7 +177,7 @@ section('grabbable rules', () => {
 section('grab, carry, drop a rock', () => {
   const f = setup();
   const { world, s, step, sp, grab, game } = f;
-  const rock = sp('rock', 20.5, 40.5, { sprite: getSprite('test-sphere', { ramp: 'rock', r: 3 }) });
+  const rock = sp('rock', OX + 20.5, OY + 40.5, { sprite: getSprite('test-sphere', { ramp: 'rock', r: 3 }) });
   const n = f.log.length;
   grab(rock, 0.1);
   const hand = game.systems.hand;
@@ -181,12 +185,12 @@ section('grab, carry, drop a rock', () => {
   const g = f.since(n).find((e) => e.type === 'grab');
   ok(g && g.entityId === rock.id && g.kind === 'rock', `grab event ${JSON.stringify(g)}`);
   // carry: move the pointer 2 tiles; the rock follows with lag and hovers above the terrain
-  const target = f.camera.worldToView(22.5, 40.5, world.heightAt(22.5, 40.5));
+  const target = f.camera.worldToView(OX + 22.5, OY + 40.5, world.heightAt(OX + 22.5, OY + 40.5));
   s.move(target.sx, target.sy);
   step(1 / 30);
-  const lagging = Math.hypot(rock.x - 22.5, rock.y - 40.5);
+  const lagging = Math.hypot(rock.x - (OX + 22.5), rock.y - (OY + 40.5));
   step(0.8);
-  ok(lagging > 0.3 && Math.hypot(rock.x - 22.5, rock.y - 40.5) < 0.1, `carried rock lags (${lagging.toFixed(2)} tiles after one tick) then catches up`);
+  ok(lagging > 0.3 && Math.hypot(rock.x - (OX + 22.5), rock.y - (OY + 40.5)) < 0.1, `carried rock lags (${lagging.toFixed(2)} tiles after one tick) then catches up`);
   ok(near(rock.z - world.heightAt(rock.x, rock.y), HAND.carryZ, 0.05), `carried rock hovers ${HAND.carryZ} above the terrain (${(rock.z - world.heightAt(rock.x, rock.y)).toFixed(2)})`);
   ok(hand.state.pose === 'hand-hold', `pose while carrying: ${hand.state.pose}`);
   ok(hand.state.z > rock.z, 'hand sits above the carried rock');
@@ -199,13 +203,13 @@ section('grab, carry, drop a rock', () => {
   step(1);
   const landed = f.since(n).filter((e) => e.type === 'landed');
   ok(landed.length === 1 && landed[0].entityId === rock.id && landed[0].speed > 0, `one landed event (${JSON.stringify(landed[0])})`);
-  ok(onTerrain(world, rock) && !rock.held && !rock.airborne && Math.hypot(rock.x - 22.5, rock.y - 40.5) < 0.15, `rock rests on the terrain under the drop point (${rock.x.toFixed(2)}, ${rock.y.toFixed(2)}, z ${rock.z.toFixed(3)})`);
+  ok(onTerrain(world, rock) && !rock.held && !rock.airborne && Math.hypot(rock.x - (OX + 22.5), rock.y - (OY + 40.5)) < 0.15, `rock rests on the terrain under the drop point (${rock.x.toFixed(2)}, ${rock.y.toFixed(2)}, z ${rock.z.toFixed(3)})`);
 });
 
 section('throw a rock far, bounce and settle', () => {
   const f = setup();
   const { world, step, sp, grab, flick } = f;
-  const rock = sp('rock', 19.5, 40.5, { sprite: getSprite('test-sphere', { ramp: 'rock', r: 3 }) });
+  const rock = sp('rock', OX + 19.5, OY + 40.5, { sprite: getSprite('test-sphere', { ramp: 'rock', r: 3 }) });
   const n = f.log.length;
   grab(rock);
   flick(0.2, -1, 12); // north over the flat village plateau
@@ -229,7 +233,7 @@ section('villagers: hard throw kills, gentle drop does not', () => {
   const f = setup();
   const { world, step, sp, grab, flick, s } = f;
   const fig = getSprite('test-figure');
-  const v1 = sp('villager', 20.5, 39.5, { hp: 1, sprite: fig });
+  const v1 = sp('villager', OX + 20.5, OY + 39.5, { hp: 1, sprite: fig });
   let n = f.log.length;
   grab(v1);
   flick(1, 0.2, 14);
@@ -241,7 +245,7 @@ section('villagers: hard throw kills, gentle drop does not', () => {
   ok(kill && kill.actor === 'player' && kill.verb === 'throw' && kill.target === 'villager' && typeof kill.x === 'number' && typeof kill.y === 'number', `kill act ${JSON.stringify(kill)}`);
   ok(world.get(v1.id) === v1, 'the hand leaves villager removal to the village');
 
-  const v2 = sp('villager', 21.5, 41.5, { hp: 0.8, sprite: fig });
+  const v2 = sp('villager', OX + 21.5, OY + 41.5, { hp: 0.8, sprite: fig });
   n = f.log.length;
   grab(v2);
   s.up(0);
@@ -258,7 +262,7 @@ section('villagers: hard throw kills, gentle drop does not', () => {
 section('a cancelled press mid-throw drops the villager, never throws it', () => {
   const f = setup();
   const { step, sp, grab, s, game } = f;
-  const v = sp('villager', 20.5, 39.5, { hp: 1, sprite: getSprite('test-figure') });
+  const v = sp('villager', OX + 20.5, OY + 39.5, { hp: 1, sprite: getSprite('test-figure') });
   const n = f.log.length;
   grab(v);
   // the moves of the hard throw above (flick(1, 0.2, 14)), ended by a cancel instead of a release
@@ -281,7 +285,7 @@ section('lethal threshold edge', () => {
   const { world, game } = f;
   const g = HAND.gravity;
   for (const [factor, dies] of [[0.98, false], [1.02, true]]) {
-    const v = world.spawn('villager', { x: 21.5, y: 40.5, hp: 1 });
+    const v = world.spawn('villager', { x: OX + 21.5, y: OY + 40.5, hp: 1 });
     const ground = world.heightAt(v.x, v.y);
     const want = HAND.lethalSpeed * factor;
     world.move(v, v.x, v.y, ground + (want * want) / (2 * g)); // free fall reaches `want` at the ground
@@ -297,7 +301,21 @@ section('lethal threshold edge', () => {
 section('throw a rock into the sea', () => {
   const f = setup();
   const { world, step, sp, grab, flick, game } = f;
-  const rock = sp('rock', 15.5, 40.5);
+  // the walkable tile nearest the village with open water 3 tiles off (the sea is far from the
+  // village on the island now), with the camera on it
+  const shore = (() => {
+    const v = f.site, W = world.w;
+    let best = null, bd = Infinity;
+    for (let ty = 3; ty < world.h - 3; ty++) for (let tx = 3; tx < W - 3; tx++) {
+      const g = world.ground[ty * W + tx];
+      if (g < 2 || g > 4 || world.ground[ty * W + tx - 3] > HAND.waterGround) continue;
+      const d = Math.hypot(tx - v.x, ty - v.y);
+      if (d < bd) { bd = d; best = { x: tx + 0.5, y: ty + 0.5 }; }
+    }
+    return best;
+  })();
+  f.camera.centerOn(shore.x, shore.y, world.heightAt(shore.x, shore.y));
+  const rock = sp('rock', shore.x, shore.y);
   grab(rock);
   // pick a direction whose landing is open water from anywhere along the flick
   const water = (p) => p && world.ground[Math.floor(p.y) * world.w + Math.floor(p.x)] <= HAND.waterGround;
@@ -326,8 +344,8 @@ section('throw a rock into the sea', () => {
 section('creature and buildings are never grabbed', () => {
   const f = setup();
   const { world, s, step, sp, grab, game } = f;
-  const c = sp('creature', 24.5, 42.5);
-  const b = sp('building', 18.5, 37.5, { hp: 1, grabbable: true, sprite: getSprite('test-box', { ramp: 'stone', h: 12 }) });
+  const c = sp('creature', OX + 24.5, OY + 42.5);
+  const b = sp('building', OX + 18.5, OY + 37.5, { hp: 1, grabbable: true, sprite: getSprite('test-box', { ramp: 'stone', h: 12 }) });
   const n = f.log.length;
   grab(c, 0.2);
   ok(game.systems.hand.state.heldId === null && !c.held, 'left press on the creature holds nothing');
@@ -342,14 +360,14 @@ section('creature and buildings are never grabbed', () => {
 section('rock thrown into a building damages it', () => {
   const f = setup();
   const { world, step, sp, game } = f;
-  const b = sp('building', 24.5, 40.5, { hp: 1, r: 1 });
-  const rock = sp('rock', 20.5, 40.5);
+  const b = sp('building', OX + 24.5, OY + 40.5, { hp: 1, r: 1 });
+  const rock = sp('rock', OX + 20.5, OY + 40.5);
   world.move(rock, rock.x, rock.y, world.heightAt(rock.x, rock.y) + 1.5);
   game.systems.hand.launch(rock, 14, 0, 3);
   step(2);
   ok(b.hp < 1 && b.hp >= 0, `building hp after a fast rock: ${b.hp.toFixed(2)}`);
-  const b2 = sp('building', 30.5, 44.5, { hp: 1, r: 1 });
-  const pebble = sp('rock', 30.5, 43.2);
+  const b2 = sp('building', OX + 30.5, OY + 44.5, { hp: 1, r: 1 });
+  const pebble = sp('rock', OX + 30.5, OY + 43.2);
   world.move(pebble, pebble.x, pebble.y, world.heightAt(pebble.x, pebble.y) + 0.2);
   game.systems.hand.launch(pebble, 0, 0.5, 0);
   step(1);
@@ -359,7 +377,7 @@ section('rock thrown into a building damages it', () => {
 section('trees uproot, orbs carry their miracle', () => {
   const f = setup();
   const { sp, grab, s, step, game, moveTo, middle } = f;
-  const tree = sp('tree', 22.5, 38.5, { sprite: getSprite('test-tree') });
+  const tree = sp('tree', OX + 22.5, OY + 38.5, { sprite: getSprite('test-tree') });
   // a press on a tree that moves pulls it up; one held still draws its wood (bulk section)
   const pull = (e) => { const q = middle(e); moveTo(q); s.down(0); s.move(q.sx + 4, q.sy); step(0.2); };
   let n = f.log.length;
@@ -376,7 +394,7 @@ section('trees uproot, orbs carry their miracle', () => {
   ok(f.since(n).filter((e) => e.type === 'act' && e.verb === 'uproot').length === 1, 'a tree uproots once');
   s.up(0);
   step(1);
-  const orb = sp('orb', 19.5, 41.5, { miracle: 'rain' });
+  const orb = sp('orb', OX + 19.5, OY + 41.5, { miracle: 'rain' });
   n = f.log.length;
   grab(orb, 0.2);
   s.up(0);
@@ -409,7 +427,7 @@ section('thrown pedestal orbs cast where they land', () => {
   // orb before a listener added here runs, so a thrown rock checks this.
   const seen = [];
   game.events.on('landed', (e) => { const o = world.get(e.entityId); if (o) seen.push({ ...e, ex: o.x, ey: o.y, ez: o.z }); });
-  const rock = world.spawn('rock', { x: 20.5, y: 40.5 });
+  const rock = world.spawn('rock', { x: OX + 20.5, y: OY + 40.5 });
   world.move(rock, rock.x, rock.y, world.heightAt(rock.x, rock.y) + 1.5);
   game.systems.hand.launch(rock, 14, 0, 14);
   step(2);
@@ -441,7 +459,7 @@ section('thrown pedestal orbs cast where they land', () => {
 section('catch a flying rock', () => {
   const f = setup();
   const { world, sp, game, moveTo, s, step, middle } = f;
-  const rock = sp('rock', 20.5, 40.5, { sprite: getSprite('test-sphere', { ramp: 'rock', r: 3 }) });
+  const rock = sp('rock', OX + 20.5, OY + 40.5, { sprite: getSprite('test-sphere', { ramp: 'rock', r: 3 }) });
   world.move(rock, rock.x, rock.y, world.heightAt(rock.x, rock.y) + 6);
   game.systems.hand.launch(rock, 0, 0, 0);
   step(1 / 30);
@@ -455,7 +473,7 @@ section('catch a flying rock', () => {
 section('stroke, slap, select and tether', () => {
   const f = setup();
   const { world, s, step, sp, moveTo, middle, game } = f;
-  const c = sp('creature', 24.5, 42.5);
+  const c = sp('creature', OX + 24.5, OY + 42.5);
   const hand = game.systems.hand;
   const rub = (segments) => {
     const n = f.log.length;
@@ -477,7 +495,7 @@ section('stroke, slap, select and tether', () => {
   ok(game.state.selectedCreature === null, 'stroking does not select the creature');
   // a rub away from the creature strokes nothing
   const away = f.log.length;
-  moveTo(f.camera.worldToView(18.5, 38.5, world.heightAt(18.5, 38.5)));
+  moveTo(f.camera.worldToView(OX + 18.5, OY + 38.5, world.heightAt(OX + 18.5, OY + 38.5)));
   s.down(0);
   const p = game.input.pointer;
   for (const dir of [1, -1, 1, -1, 1]) for (let i = 0; i < 3; i++) { s.move(p.sx + 4 * dir, p.sy); step(1 / 30); }
@@ -496,7 +514,7 @@ section('stroke, slap, select and tether', () => {
 
   // right click on ground without a selection does nothing
   n = f.log.length;
-  moveTo(f.camera.worldToView(20.5, 44.5, world.heightAt(20.5, 44.5)));
+  moveTo(f.camera.worldToView(OX + 20.5, OY + 44.5, world.heightAt(OX + 20.5, OY + 44.5)));
   s.down(2); s.up(2);
   ok(!f.since(n).some((e) => e.type === 'tether'), 'no tether without a selected creature');
 
@@ -506,7 +524,7 @@ section('stroke, slap, select and tether', () => {
   ok(game.state.selectedCreature === c.id, 'left click on the creature selects it');
   step(1 / 30);
   ok(hand.state.pose === 'hand-point', `pose while a creature is selected: ${hand.state.pose}`);
-  const gx = 19.5, gy = 44.5;
+  const gx = OX + 19.5, gy = OY + 44.5;
   moveTo(f.camera.worldToView(gx, gy, world.heightAt(gx, gy)));
   n = f.log.length;
   s.down(2); s.up(2);
@@ -529,8 +547,8 @@ section('front-most pick wins', () => {
   const f = setup();
   const { world, sp, moveTo, s, game } = f;
   const fig = getSprite('test-figure');
-  const back = sp('villager', 20.5, 40.5, { sprite: fig });
-  const front = sp('villager', 20.9, 40.9, { sprite: fig }); // larger x + y: drawn later, in front
+  const back = sp('villager', OX + 20.5, OY + 40.5, { sprite: fig });
+  const front = sp('villager', OX + 20.9, OY + 40.9, { sprite: fig }); // larger x + y: drawn later, in front
   const v = f.camera.worldToView(front.x, front.y, front.z);
   moveTo({ sx: v.sx, sy: v.sy - 6 });
   s.down(0);
@@ -542,8 +560,8 @@ section('game.state.uiCapture blocks new grabs, strokes, slaps and tethers, neve
   const f = setup();
   const { s, step, sp, grab, moveTo, middle, game } = f;
   const hand = game.systems.hand;
-  const rock = sp('rock', 20.5, 40.5, { sprite: getSprite('test-sphere', { ramp: 'rock', r: 3 }) });
-  const c = sp('creature', 24.5, 42.5);
+  const rock = sp('rock', OX + 20.5, OY + 40.5, { sprite: getSprite('test-sphere', { ramp: 'rock', r: 3 }) });
+  const c = sp('creature', OX + 24.5, OY + 42.5);
   const seen = (n, type) => f.since(n).filter((e) => e.type === type);
   // captured: press on the rock grabs nothing, a right click slaps nothing, a rub strokes nothing
   game.state.uiCapture = true;
@@ -572,7 +590,7 @@ section('game.state.uiCapture blocks new grabs, strokes, slaps and tethers, neve
   s.down(0); s.up(0);
   game.state.uiCapture = true;
   n = f.log.length;
-  moveTo(f.camera.worldToView(19.5, 44.5, f.world.heightAt(19.5, 44.5)));
+  moveTo(f.camera.worldToView(OX + 19.5, OY + 44.5, f.world.heightAt(OX + 19.5, OY + 44.5)));
   s.down(2); s.up(2);
   ok(game.state.selectedCreature === c.id && seen(n, 'tether').length === 0, 'captured: a right click on the ground sends no tether');
   game.state.uiCapture = null; // hand it back to the ui system
@@ -633,7 +651,9 @@ section('the hand in bulk', () => {
   moveTo(over(pile)); step(0.2); s.up(0); step(1 / 30);
   ok(pile.wood === w0 + want && !H.held.length, `the wood dropped on the woodpile goes into stock (${w0} -> ${pile.wood})`);
   // a tree pulled up, set down, then drained: one uproot act in all (grab() counts it, the drain not again)
-  const lying = world.query({ kind: 'tree' }).filter((t) => !t.held).sort((a, b) => Math.hypot(a.x - store.x, a.y - store.y) - Math.hypot(b.x - store.x, b.y - store.y))[0];
+  // a tree with no other within 6 tiles, so the drag below sweeps up no second one
+  const alone = (t) => !world.query({ kind: 'tree', x: t.x, y: t.y, r: 6 }).some((o) => o !== t);
+  const lying = world.query({ kind: 'tree' }).filter((t) => !t.held && alone(t)).sort((a, b) => Math.hypot(a.x - store.x, a.y - store.y) - Math.hypot(b.x - store.x, b.y - store.y))[0];
   n = f.log.length;
   const lq = middle(lying);
   moveTo(lq); s.down(0); s.move(lq.sx + 4, lq.sy); step(0.2);
@@ -709,9 +729,11 @@ section('the hand in bulk', () => {
   step(1 / 30);
   ok(nGroup === 3 && !H.held.length && group.every((v) => !v.held && v.airborne), `a flick throws the whole group (${nGroup} held, then ${H.held.length}; airborne ${group.filter((v) => v.airborne).length})`);
   step(2);
-  for (const v of group.slice(0, 2)) { v.path = null; v.work = null; v.wait = 5; world.move(v, vx, vy, world.heightAt(vx, vy)); }
+  // a fresh pair: whether the thrown group survives its landing depends on the ground it lands on
+  const pair = [0, 1].map(() => sp('villager', vx, vy, { hp: 1, sprite: fig, grabbable: true, owner: 'player' }));
   step(1 / 30);
-  moveTo(middle(group[0])); s.down(0); step(0.2);
+  for (const v of pair) { v.path = null; v.work = null; v.wait = 5; world.move(v, vx, vy, world.heightAt(vx, vy)); }
+  moveTo(middle(pair[0])); s.down(0); step(0.2);
   ok(H.held.length === 1, `a press on two villagers standing on one spot holds one (${H.held.length})`);
   step(0.2); s.up(0); step(1);
 
@@ -827,8 +849,8 @@ section('the amount label stays in view', () => {
 section('update and input handlers never touch the DOM or Math.random', () => {
   const f = setup();
   const { sp, s, game } = f;
-  const rock = sp('rock', 20.5, 40.5);
-  const c = sp('creature', 24.5, 42.5);
+  const rock = sp('rock', OX + 20.5, OY + 40.5);
+  const c = sp('creature', OX + 24.5, OY + 42.5);
   const touched = [];
   const names = ['window', 'document', 'requestAnimationFrame', 'HTMLCanvasElement', 'navigator', 'localStorage'];
   const saved = new Map(names.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));

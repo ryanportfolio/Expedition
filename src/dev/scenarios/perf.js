@@ -1,8 +1,10 @@
 // Perf scenario: the worst-case scene for frame timing (scripts/perf-check.mjs), on the real island,
 // terrain, art and HUD. Boots like play (the play bootstrap, screen 'play', both villages and the
-// creature), fast-forwards 3 sim minutes so the player village is full, centres the camera between
-// the player temple, the village and the creature, then casts all four miracles for free near the
-// village and keeps them alive while the village stays full:
+// creature), then builds a full town round each village (buildTown in src/dev/town.js: TOWN.player villagers in
+// the player's, TOWN.rival in the rival's; ?town=<n>&rival=<n> change them), lets the sim settle
+// for SETTLE sim seconds, centres the camera between the player temple, the village and the
+// creature, then casts all four miracles for free near the village and keeps them alive while the
+// village stays full:
 // - fire on trees in view near the view centre, never where it can reach a building. A fire cast
 //   lights everything within the fire radius as one blaze, and a blaze catches at most spreadBudget
 //   more entities, each jump at most spreadReach edge to edge (src/miracles/fire.js); so a building
@@ -17,7 +19,8 @@
 //   half a building's hp), sets alight only fire-safe trees, and stands far enough from every
 //   villager that none can walk into the kill radius before the bolt lands.
 // A tick hook re-casts each miracle on its own sim-time period, so all four stay alive for as long as
-// the scene runs. Last, it hands the game to the real-time rAF loop (game.start(), the same loop
+// the scene runs, and keeps OPEN_SITES house blueprints open in the player town, so its builders
+// keep hauling from the woodpiles to sites (a finished site is replaced at the next free spot). Last, it hands the game to the real-time rAF loop (game.start(), the same loop
 // main.js runs) and sets window.__perf.ready.
 //
 // The page-side profiler (window.__perf) wraps the game's own entry points (game.frame, game.tick,
@@ -35,6 +38,7 @@
 import { TUNING } from '../../miracles/tuning.js';
 import { FX } from '../../miracles/fx.js';
 import { VILLAGE } from '../../village/config.js';
+import { TOWN, OPEN_PER, buildTown, keepSites as keepTownSites } from '../town.js';
 
 export const CAST = {
   rain: 8, // s between rain casts (a cloud lives 10 s, so two overlap for 2 s of every 8)
@@ -42,7 +46,7 @@ export const CAST = {
   heal: 2.5, // heal ring lasts 2.9 s
   lightning: 2.5, // strike effect lasts 3 s
 };
-const FAST_FORWARD = 180; // sim seconds before the scene opens
+const SETTLE = 30; // sim seconds between building the towns and opening the scene
 const F = TUNING.fire, L = TUNING.lightning;
 /** Edge-to-edge distance from a fire to a building beyond which its blaze can't reach it. */
 const FIRE_SAFE = F.spreadReach * F.spreadBudget + 0.25;
@@ -129,8 +133,38 @@ export default async function perf(t, game) {
   t.input.leave(); // no edge panning while the loop runs
   t.assert(vs.ready && cs.entity, 'both villages and the creature are set up');
 
-  // ---- fill the village
-  for (let s = 0; s < FAST_FORWARD; s += 10) t.step(10);
+  // ---- the towns. A park is kept free of buildings round the densest wood near where the camera
+  // will look, so fires there stay farther than FIRE_SAFE from every building and the lightning
+  // has open ground to strike.
+  const q = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
+  // ?town=<n>&rival=<n>: whole numbers 0 or more; anything else (an empty value too) is refused, so a
+  // typo never runs a smaller scene than asked for
+  const size = (k) => {
+    if (!q.has(k)) return null;
+    const v = q.get(k), n = Number(v);
+    t.assert(v !== '' && Number.isInteger(n) && n >= 0, `?${k}=${v} is a whole number of villagers`);
+    return v !== '' && Number.isInteger(n) && n >= 0 ? n : null;
+  };
+  const pop = { player: size('town') ?? TOWN.player, rival: size('rival') ?? TOWN.rival };
+  const t0 = world.sites.temple, v0 = world.sites.village, c0 = cs.entity;
+  const look = { x: (t0.x + v0.x + 0.5 + c0.x) / 3, y: (t0.y + v0.y + 0.5 + c0.y) / 3 };
+  const woods = world.query({ kind: 'tree', x: look.x, y: look.y, r: 16 });
+  const WOOD_R = 6; // the park's wood: trees this far from its middle stay farther than FIRE_SAFE from every building
+  const density = (tr) => woods.filter((o) => Math.hypot(o.x - tr.x, o.y - tr.y) <= WOOD_R).length;
+  const park = woods.map((tr) => ({ x: tr.x, y: tr.y, n: density(tr) })).sort((a, b) => b.n - a.n || a.y - b.y || a.x - b.x)[0] ?? look;
+  const PARK_R = WOOD_R + FIRE_SAFE + 2.5; // wood radius + fire reach + half a building
+  const keepOut = (x, y) => Math.hypot(x - park.x, y - park.y) < PARK_R;
+  const town = buildTown(game, 'player', pop.player, keepOut);
+  const rivalTown = buildTown(game, 'rival', pop.rival, () => false);
+  const OPEN_SITES = Math.ceil(pop.player / OPEN_PER);
+  const keepSites = () => keepTownSites(game, town, OPEN_SITES);
+  const opened = keepSites();
+  for (const tw of [town, rivalTown]) t.assert(Object.keys(tw.want).every((k) => tw.have[k] === tw.want[k]), `the ${tw.owner} town is built in full (${JSON.stringify(tw.have)}, want ${JSON.stringify(tw.want)})`);
+  t.assert(opened === OPEN_SITES, `${opened} of ${OPEN_SITES} house sites open in the player town`);
+  t.log('towns', JSON.stringify({ pop, want: town.want, have: town.have, park: { x: +park.x.toFixed(1), y: +park.y.toFixed(1), trees: park.n }, openSites: OPEN_SITES, entities: world.entities.size }));
+
+  // ---- let the towns settle (jobs dealt, builders and farmers under way)
+  for (let s = 0; s < SETTLE; s += 5) { t.step(5); keepSites(); }
   const player = (kind) => world.query({ kind }).filter((e) => e.owner === 'player');
   const standing = (b) => b.stage === 'done' && b.hp > 0;
   const village = () => {
@@ -189,11 +223,15 @@ export default async function perf(t, game) {
   };
   camera.centerOn(view.x, view.y, world.heightAt(view.x, view.y));
   const firstFire = fireTarget() ?? view;
-  const far = player('building').filter((b) => b.type !== 'temple').sort(byDist(firstFire)).at(-1) ?? temple;
+  // rain on the player building in view (cloud included: 80 px pad) farthest from the first fire, so
+  // its clouds are drawn and it does not put the fires out; with a town round the village, the
+  // farthest building of all stands off screen
+  const seen = (b) => inView(camera.worldToView(b.x, b.y, world.heightAt(b.x, b.y)), 80);
+  const far = player('building').filter((b) => b.type !== 'temple' && seen(b)).sort(byDist(firstFire)).at(-1) ?? temple;
   const spots = { rain: { x: far.x, y: far.y }, heal: { x: centre.x, y: centre.y } };
   // lightning: spots on a 1-tile grid round the village centre, nearest first
   const boltGrid = [];
-  for (let dy = -8; dy <= 8; dy++) for (let dx = -8; dx <= 8; dx++) boltGrid.push({ x: centre.x + dx + 0.5, y: centre.y + dy + 0.5 });
+  for (let dy = -14; dy <= 14; dy++) for (let dx = -14; dx <= 14; dx++) boltGrid.push({ x: centre.x + dx + 0.5, y: centre.y + dy + 0.5 });
   boltGrid.sort(byDist(centre));
   const boltTarget = () => {
     let best = null, bestD = -1;
@@ -229,15 +267,18 @@ export default async function perf(t, game) {
   const next = {};
   let simT = 0;
   const tick = game.tick;
+  let siteT = 0;
   game.tick = (dt) => {
     tick(dt);
     simT += dt;
+    if (simT >= siteT) { keepSites(); siteT = simT + 1; }
     for (const m of Object.keys(CAST)) {
       if (simT + 1e-9 >= (next[m] ?? 0)) { castNow(m); next[m] = simT + CAST[m]; }
     }
     if (!watch.recording) return;
     const a = active(), at = performance.now();
-    for (const m of Object.keys(a)) if (!a[m] && watch.inactive[m].length < 5000) watch.inactive[m].push(at);
+    // the latest 5000 stamps per effect: the end-of-window check reads the last 2 s
+    for (const m of Object.keys(a)) if (!a[m] && watch.inactive[m].push(at) > 5000) watch.inactive[m].shift();
     const v = village();
     watch.minHouses = Math.min(watch.minHouses, v.houses);
     watch.minVillagers = Math.min(watch.minVillagers, v.villagers);
@@ -263,11 +304,12 @@ export default async function perf(t, game) {
   const burning = world.query({}).filter((e) => e.burning > 0);
   const v = village();
   t.log('scene', JSON.stringify({ counts, burning: burning.map((e) => `${e.kind}:${e.type ?? e.species ?? ''}`), fx: game.fx.live.length, rains: M.effects.rains.length, spots, firstFire: { x: firstFire.x, y: firstFire.y }, ...v, active: active() }));
-  t.assert(v.villagers >= 8, `the player village is populated (${v.villagers} villagers)`);
+  t.assert(v.villagers >= 0.9 * pop.player, `the player town is populated (${v.villagers} villagers, want ${pop.player})`);
   t.assert(v.houses >= 3, `the player village has its houses (${v.houses} standing)`);
   t.assert(burning.length >= 3, `several fires burn (${burning.length} entities burning)`);
   t.assert(v.burningBuildings === 0, `no player building is burning (${v.burningBuildings})`);
   t.assert(M.effects.rains.length >= 1, 'rain is falling');
+  t.assert(seen(spots.rain) && Math.hypot(spots.rain.x - firstFire.x, spots.rain.y - firstFire.y) > TUNING.rain.radius + F.radius, `rain falls in view, clear of the fires (at ${spots.rain.x}, ${spots.rain.y})`);
   t.assert(counts.heal >= 1 && counts.lightning >= 1 && counts.fire >= 1 && counts.rain >= 1, `all four miracles cast (${JSON.stringify(counts)})`);
   t.assert(Object.values(active()).every(Boolean), `all four miracle effects alive (${JSON.stringify(active())})`);
   const tv = camera.worldToView(temple.x, temple.y, world.heightAt(temple.x, temple.y));

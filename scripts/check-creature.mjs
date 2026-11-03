@@ -383,21 +383,27 @@ for (const seed of [1, 2, 3]) {
   const { world, events } = game;
   game.clock.run(30, game.tick);
   const e = cs.entity;
-  // a water tile 2 tiles east of walkable ground the creature can reach, with water between
+  // the water tile 2 tiles straight off walkable ground the creature can reach, with water between,
+  // whose shore is the cheapest to reach
   const f = cs.paths.field(Math.floor(e.y) * world.w + Math.floor(e.x));
-  let sea = null;
-  for (let i = 0; i < f.dist.length && !sea; i++) {
+  let sea = null, seaCost = Infinity;
+  for (let i = 0; i < f.dist.length; i++) {
     if (world.ground[i] >= 2) continue;
     const x = i % world.w, y = (i / world.w) | 0;
-    if (x < 2 || !Number.isFinite(f.dist[i - 2]) || f.dist[i - 2] > 30) continue;
-    if (world.ground[i - 1] >= 2) continue;
-    sea = { x: x + 0.5, y: y + 0.5 };
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const x2 = x - 2 * dx, y2 = y - 2 * dy;
+      if (!world.inBounds(x2, y2)) continue;
+      const cost = f.dist[y2 * world.w + x2];
+      if (!(cost < seaCost) || world.ground[(y - dy) * world.w + x - dx] >= 2) continue;
+      sea = { x: x + 0.5, y: y + 0.5 }; seaCost = cost;
+    }
   }
-  check(!!sea, `found a sea tile 2 tiles off a reachable shore (${JSON.stringify(sea)})`);
+  check(!!sea && seaCost <= 80, `found a sea tile 2 tiles off a reachable shore (${JSON.stringify(sea)}, path cost ${seaCost.toFixed(1)})`);
   const s = moveSampler(world);
   events.emit('tether', { creatureId: e.id, x: sea.x, y: sea.y });
   let arrived = false;
-  for (let i = 0; i < 45 * 30 && !arrived; i++) { game.tick(1 / 30); s.sample(e.x, e.y); arrived = !!cs.state().tether?.arrived; }
+  const walkFor = Math.max(45, (seaCost / CREATURE.walkSpeed) * 1.5); // seconds: the walk there with room to spare
+  for (let i = 0; i < walkFor * 30 && !arrived; i++) { game.tick(1 / 30); s.sample(e.x, e.y); arrived = !!cs.state().tether?.arrived; }
   const g = world.ground[Math.floor(e.y) * world.w + Math.floor(e.x)];
   const off = Math.hypot(e.x - sea.x, e.y - sea.y);
   check(arrived && g >= 2 && g <= 4 && off <= CREATURE.tetherRadius + 0.5, `tether to the sea stops on the shore (ground ${g} at ${e.x.toFixed(1)},${e.y.toFixed(1)}, ${off.toFixed(1)} from the point)`);

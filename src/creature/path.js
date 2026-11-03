@@ -3,9 +3,15 @@
 // maxStep per step. Moves are 8-neighbour; a diagonal needs both orthogonal tiles it passes to be
 // valid steps too, so paths never cut a cliff corner. One Dijkstra field from the creature's tile
 // gives the cost to every tile; a path is read back through the predecessor array.
-import { isWalkGround } from '../village/path.js';
+//
+// The search runs on the village paths' typed heap and per-map step masks (src/village/path.js),
+// built once per map (rebuilt when world.loadMap swaps the height array): on the 192 x 192 island
+// the old array-of-pairs heap and per-step checks made each field a 7 ms tick spike. Pops come in
+// the same order, so dist and prev are what they were.
+import { isWalkGround, stepMasks, newHeap, heapPush, heapPop } from '../village/path.js';
 
 const D8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+const COST = D8.map(([dx, dy]) => (dx && dy ? Math.SQRT2 : 1));
 
 export function createCreaturePaths(world, maxStep = 2) {
   const walkable = (tx, ty) => world.inBounds(tx, ty) && isWalkGround(world.ground[ty * world.w + tx]);
@@ -19,42 +25,28 @@ export function createCreaturePaths(world, maxStep = 2) {
       step4(ax, ay, ax, ay + dy) && step4(ax, ay + dy, ax + dx, ay + dy);
   }
 
+  let mapRef = null, steps = null;
+
   /** { dist: Float64Array, prev: Int32Array } from start tile index (dist Infinity = unreachable). */
   function field(start) {
     const W = world.w, N = W * world.h;
+    if (mapRef !== world.height || steps.length !== N) { mapRef = world.height; steps = stepMasks(world, canStep); }
     const dist = new Float64Array(N).fill(Infinity);
     const prev = new Int32Array(N).fill(-1);
     const sx = start % W, sy = (start / W) | 0;
     if (!walkable(sx, sy)) return { dist, prev, start };
     dist[start] = 0;
-    const heap = [[0, start]];
-    const less = (a, b) => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
-    const swap = (i, j) => { const t = heap[i]; heap[i] = heap[j]; heap[j] = t; };
-    while (heap.length) {
-      const top = heap[0], last = heap.pop();
-      if (heap.length) {
-        heap[0] = last;
-        for (let i = 0; ;) {
-          const l = 2 * i + 1, r = l + 1;
-          let m = i;
-          if (l < heap.length && less(heap[l], heap[m])) m = l;
-          if (r < heap.length && less(heap[r], heap[m])) m = r;
-          if (m === i) break;
-          swap(i, m); i = m;
-        }
-      }
-      const [d, i] = top;
+    const h = newHeap();
+    heapPush(h, 0, start);
+    while (h.n > 0) {
+      heapPop(h);
+      const d = h.key[h.n], i = h.at[h.n];
       if (d > dist[i]) continue;
-      const x = i % W, y = (i / W) | 0;
-      for (const [dx, dy] of D8) {
-        if (!canStep(x, y, dx, dy)) continue;
-        const j = (y + dy) * W + x + dx;
-        const nd = d + (dx && dy ? Math.SQRT2 : 1);
-        if (nd < dist[j]) {
-          dist[j] = nd; prev[j] = i;
-          heap.push([nd, j]);
-          for (let k = heap.length - 1; k > 0;) { const p = (k - 1) >> 1; if (!less(heap[k], heap[p])) break; swap(k, p); k = p; }
-        }
+      const x = i % W, y = (i - x) / W, m = steps[i];
+      for (let k = 0; k < 8; k++) {
+        if (!(m & (1 << k))) continue;
+        const j = (y + D8[k][1]) * W + x + D8[k][0], nd = d + COST[k];
+        if (nd < dist[j]) { dist[j] = nd; prev[j] = i; heapPush(h, nd, j); }
       }
     }
     return { dist, prev, start };
