@@ -38,7 +38,7 @@
 import { TUNING } from '../../miracles/tuning.js';
 import { FX } from '../../miracles/fx.js';
 import { VILLAGE } from '../../village/config.js';
-import { TOWN, OPEN_PER, buildTown } from '../town.js';
+import { TOWN, OPEN_PER, buildTown, keepSites as keepTownSites } from '../town.js';
 
 export const CAST = {
   rain: 8, // s between rain casts (a cloud lives 10 s, so two overlap for 2 s of every 8)
@@ -137,7 +137,14 @@ export default async function perf(t, game) {
   // will look, so fires there stay farther than FIRE_SAFE from every building and the lightning
   // has open ground to strike.
   const q = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
-  const size = (k) => (q.has(k) && Number.isInteger(Number(q.get(k))) && Number(q.get(k)) >= 0 ? Number(q.get(k)) : null);
+  // ?town=<n>&rival=<n>: whole numbers 0 or more; anything else (an empty value too) is refused, so a
+  // typo never runs a smaller scene than asked for
+  const size = (k) => {
+    if (!q.has(k)) return null;
+    const v = q.get(k), n = Number(v);
+    t.assert(v !== '' && Number.isInteger(n) && n >= 0, `?${k}=${v} is a whole number of villagers`);
+    return v !== '' && Number.isInteger(n) && n >= 0 ? n : null;
+  };
   const pop = { player: size('town') ?? TOWN.player, rival: size('rival') ?? TOWN.rival };
   const t0 = world.sites.temple, v0 = world.sites.village, c0 = cs.entity;
   const look = { x: (t0.x + v0.x + 0.5 + c0.x) / 3, y: (t0.y + v0.y + 0.5 + c0.y) / 3 };
@@ -148,18 +155,12 @@ export default async function perf(t, game) {
   const PARK_R = WOOD_R + FIRE_SAFE + 2.5; // wood radius + fire reach + half a building
   const keepOut = (x, y) => Math.hypot(x - park.x, y - park.y) < PARK_R;
   const town = buildTown(game, 'player', pop.player, keepOut);
-  buildTown(game, 'rival', pop.rival, () => false);
+  const rivalTown = buildTown(game, 'rival', pop.rival, () => false);
   const OPEN_SITES = Math.ceil(pop.player / OPEN_PER);
-  /** Keeps OPEN_SITES player house blueprints open, at the town's next free spots. */
-  const keepSites = () => {
-    let open = world.query({ kind: 'building' }).filter((b) => b.owner === 'player' && (b.stage === 'blueprint' || b.stage === 'building') && b.hp > 0).length;
-    for (; open < OPEN_SITES && town.next < town.spots.length; town.next++) {
-      const { tx, ty } = town.spots[town.next];
-      if (keepOut(tx + 0.5, ty + 0.5) || !vs.sim.validate('house', tx, ty, 'player', { margin: 1 }).ok) continue;
-      if (vs.placeBlueprint('house', tx, ty, 'player') !== null) open++;
-    }
-  };
-  keepSites();
+  const keepSites = () => keepTownSites(game, town, OPEN_SITES);
+  const opened = keepSites();
+  for (const tw of [town, rivalTown]) t.assert(Object.keys(tw.want).every((k) => tw.have[k] === tw.want[k]), `the ${tw.owner} town is built in full (${JSON.stringify(tw.have)}, want ${JSON.stringify(tw.want)})`);
+  t.assert(opened === OPEN_SITES, `${opened} of ${OPEN_SITES} house sites open in the player town`);
   t.log('towns', JSON.stringify({ pop, want: town.want, have: town.have, park: { x: +park.x.toFixed(1), y: +park.y.toFixed(1), trees: park.n }, openSites: OPEN_SITES, entities: world.entities.size }));
 
   // ---- let the towns settle (jobs dealt, builders and farmers under way)
@@ -276,7 +277,8 @@ export default async function perf(t, game) {
     }
     if (!watch.recording) return;
     const a = active(), at = performance.now();
-    for (const m of Object.keys(a)) if (!a[m] && watch.inactive[m].length < 5000) watch.inactive[m].push(at);
+    // the latest 5000 stamps per effect: the end-of-window check reads the last 2 s
+    for (const m of Object.keys(a)) if (!a[m] && watch.inactive[m].push(at) > 5000) watch.inactive[m].shift();
     const v = village();
     watch.minHouses = Math.min(watch.minHouses, v.houses);
     watch.minVillagers = Math.min(watch.minVillagers, v.villagers);

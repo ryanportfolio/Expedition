@@ -1,14 +1,16 @@
 // Node bench for crowd cost (no browser): builds the island with a town of hundreds round each
-// village (src/dev/town.js, as the perf scene does), lets it settle, then times sim ticks per system
+// village and keeps house sites open in the player town (src/dev/town.js, as the perf scene does,
+// without the perf scene's park, miracles or camera), lets it settle, then times sim ticks per system
 // and renders of a 640 x 360 view over the player town (terrain, systems draw, collect, sort+blit).
 // Frame timing itself is scripts/perf-check.mjs in headed Chrome; this bench isolates the CPU work
 // so a change can be measured in seconds, deterministically.
 //
 //   node scripts/sim-bench.mjs [--town <n>] [--rival <n>] [--seed <n>] [--settle <s>] [--seconds <s>]
 //
-// Prints medians, p95 and max in ms. Exit 0 always: a measuring tool, not a gate.
+// Prints medians, p95 and max in ms. A measuring tool, not a gate: exit 0 after a run, 1 on a bad
+// argument.
 import { createGame } from '../src/game.js';
-import { TOWN, buildTown } from '../src/dev/town.js';
+import { TOWN, OPEN_PER, buildTown, keepSites } from '../src/dev/town.js';
 import { makeLut } from '../src/art/lut.js';
 
 const warn = console.warn;
@@ -17,9 +19,10 @@ console.warn = (...a) => { if (!String(a[0]).startsWith('art registry:')) warn(.
 const o = { town: TOWN.player, rival: TOWN.rival, seed: 1, settle: 30, seconds: 20 };
 for (let i = 2; i < process.argv.length; i += 2) {
   const k = process.argv[i].replace(/^--/, ''), v = Number(process.argv[i + 1]);
-  if (!(k in o) || !Number.isFinite(v) || v < 0) throw new Error(`bad argument ${process.argv[i]} ${process.argv[i + 1]}`);
+  if (!(k in o) || !Number.isFinite(v) || v < 0 || (k !== 'settle' && k !== 'seconds' && !Number.isInteger(v))) throw new Error(`bad argument ${process.argv[i]} ${process.argv[i + 1]}`);
   o[k] = v;
 }
+if (!(o.seconds > 0)) throw new Error('--seconds must be more than 0');
 const pct = (l, p) => { const s = [...l].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.max(0, Math.ceil((p / 100) * s.length) - 1))]; };
 const fmt = (l) => `median ${pct(l, 50).toFixed(2)}, p95 ${pct(l, 95).toFixed(2)}, max ${Math.max(...l).toFixed(2)}`;
 
@@ -28,11 +31,13 @@ const { world, systems } = game;
 let t = performance.now();
 systems.village.setup();
 systems.creature.setup();
-buildTown(game, 'player', o.town, () => false);
+const town = buildTown(game, 'player', o.town, () => false);
 buildTown(game, 'rival', o.rival, () => false);
+const open = Math.ceil(o.town / OPEN_PER);
+keepSites(game, town, open);
 console.log(`setup + towns ${(performance.now() - t).toFixed(0)} ms; map ${world.w}x${world.h}, ${world.entities.size} entities`);
 t = performance.now();
-game.clock.run(Math.round(o.settle * 30), game.tick);
+for (let i = 0; i < Math.round(o.settle * 30); i++) { game.tick(1 / 30); if (i % 30 === 29) keepSites(game, town, open); }
 console.log(`settle ${o.settle} s of sim: ${(performance.now() - t).toFixed(0)} ms`);
 
 // per-system tick times
@@ -43,7 +48,7 @@ for (const n of game.systemOrder) {
 }
 const ticks = [];
 const tick = game.tick;
-for (let i = 0; i < o.seconds * 30; i++) { const a = performance.now(); tick(1 / 30); ticks.push(performance.now() - a); }
+for (let i = 0; i < o.seconds * 30; i++) { const a = performance.now(); tick(1 / 30); ticks.push(performance.now() - a); if (i % 30 === 29) keepSites(game, town, open); }
 const count = (owner) => world.query({ kind: 'villager' }).filter((v) => v.owner === owner && !v.dying).length;
 console.log(`villagers: player ${count('player')}, rival ${count('rival')}; ${world.entities.size} entities`);
 console.log(`tick: ${fmt(ticks)} ms`);

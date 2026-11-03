@@ -216,7 +216,7 @@ export default async function hand(t, game) {
   t.assert(game.state.selectedCreature === creature.id, 'left click selects the creature');
   tick();
   t.assert(handSys.state.pose === 'hand-point', `hand points while the creature is selected (${handSys.state.pose})`);
-  const gx = 17.5, gy = 43.5;
+  const gx = OX + 17.5, gy = OY + 43.5;
   moveTo(ground(gx, gy));
   await t.shot('tether-aim');
   n = log.length;

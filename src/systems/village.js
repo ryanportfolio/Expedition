@@ -29,7 +29,7 @@ export function create(game) {
     update(dt) { sim.update(dt); },
     draw(ctx) {
       if (!sim.ready) return;
-      const near = (e) => !ctx || !e.sprite || spriteInView(e, ctx.camX, ctx.camY, ctx.w, ctx.h, SPRITE_PAD);
+      const near = (e) => !ctx?.cull || !e.sprite || spriteInView(e, ctx.camX, ctx.camY, ctx.w, ctx.h, SPRITE_PAD);
       // getSprite serializes its options into a sorted key on every call; with hundreds of villagers
       // in view that was most of this draw, so the sprite is looked up again only when what it is
       // picked by changes (picked: entity -> the options last looked up, as a plain string).

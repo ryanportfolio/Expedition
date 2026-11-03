@@ -4,7 +4,7 @@
 //   node scripts/perf-check.mjs [--budget <ms>] [--warmup <s>] [--seconds <s>] [--window <WxH>] [--out <dir>]
 //                               [--scenario <name>] [--town <n>] [--rival <n>]
 //
-// --town and --rival set the villagers in the player and rival towns (default: TOWN in perf.js).
+// --town and --rival set the villagers in the player and rival towns (default: TOWN in src/dev/town.js).
 //
 // Builds with Vite, serves dist from node on an ephemeral port, opens headed Chrome through
 // launchPlacedChrome() (off screen, muted; never headless, never minimized, so rAF runs at the

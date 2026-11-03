@@ -405,24 +405,24 @@ function asciiMap(m) {
   for (const s of [m.sites.temple, m.sites.rivalTemple]) chars[s.y * W + s.x] = '*';
   const c = m.sites.creatureStart;
   chars[c.y * W + c.x] = 'C';
-  const lines = ['    ' + colRuler(), ];
-  for (let y = 0; y < W; y++) lines.push(String(y).padStart(2, ' ') + '  ' + chars.slice(y * W, y * W + W).join(''));
+  const lines = ['     ' + colRuler(), ];
+  for (let y = 0; y < W; y++) lines.push(String(y).padStart(3, ' ') + '  ' + chars.slice(y * W, y * W + W).join(''));
   return lines.join('\n');
 }
 
 function heightDump(m) {
-  const lines = ['    ' + colRuler()];
+  const lines = ['     ' + colRuler()];
   for (let y = 0; y < W; y++) {
     let row = '';
     for (let x = 0; x < W; x++) row += m.height[y * W + x].toString(16);
-    lines.push(String(y).padStart(2, ' ') + '  ' + row);
+    lines.push(String(y).padStart(3, ' ') + '  ' + row);
   }
   return lines.join('\n');
 }
 
 function colRuler() {
   let s = '';
-  for (let x = 0; x < W; x++) s += x % 10 === 0 ? String((x / 10) | 0) : ' ';
+  for (let x = 0; x < W; x++) s += x % 10 === 0 ? String(((x / 10) | 0) % 10) : ' ';
   return s;
 }
 

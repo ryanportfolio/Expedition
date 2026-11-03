@@ -89,7 +89,9 @@ export function buildTerrainCache(world, { owner: wantOwner = false } = {}) {
 
 /** Cache px per chunk side. A chunk paints in about a millisecond; a 640 x 360 view spans about 24. */
 export const CHUNK = 128;
-/** Chunks kept painted (16 KB each); the least recently drawn go first. */
+/** Chunks kept painted at least (16 KB each); the least recently drawn go first. The pass raises the
+ * count (keep) to twice what a view and its prefetch ring touch, so a very large view never evicts
+ * chunks it is still drawing. */
 const CHUNKS_KEPT = 256;
 
 /**
@@ -106,7 +108,7 @@ export function createTerrainChunks(world) {
   const kept = new Map(); // ci + cj * cols -> chunk, least recently used first
   const c = {
     w: P.cw, h: P.ch, ox: P.ox, oy: P.oy, mapW: P.MW, mapH: P.MH, surf: P.surf, height: P.H, ground: P.G,
-    cols, rows, built: 0, paintMs: 0,
+    cols, rows, built: 0, paintMs: 0, keep: CHUNKS_KEPT,
     has(ci, cj) { return kept.has(ci + cj * cols); },
     /** The palette index at cache pixel (x, y) (0 outside the cache), painting its chunk if need be. */
     at(x, y) {
@@ -123,7 +125,7 @@ export function createTerrainChunks(world) {
       c.paintMs += performance.now() - t0;
       c.built++;
       kept.set(key, d);
-      if (kept.size > CHUNKS_KEPT) kept.delete(kept.keys().next().value);
+      if (kept.size > c.keep) kept.delete(kept.keys().next().value);
       return d;
     },
   };

@@ -413,15 +413,38 @@ function longRun(seed) {
 }
 // A search runs only as far as the starts asked of it and resumes for the next (src/village/path.js):
 // on the island, paths and distances from searches resumed start by start must equal those read off
-// searches first run to the end, for near and far starts, unreachable ones and repeat goals.
+// searches first run to the end, for near and far starts, unreachable ones and repeat goals; and the
+// fields run to the end must equal a plain whole-map Dijkstra written here (array heap, live canStep:
+// the search as it was before the typed heap and step masks), so a bug both share still shows.
 {
   const world = createWorld().loadMap(buildIsland());
   const lazy = createPaths(world), full = createPaths(world);
+  const reference = (goal) => {
+    const W = world.w, dist = new Float64Array(W * world.h).fill(Infinity), heap = [];
+    if (!full.walkable(goal % W, (goal / W) | 0)) return dist;
+    dist[goal] = 0; heap.push([0, goal]);
+    while (heap.length) {
+      let m = 0;
+      for (let k = 1; k < heap.length; k++) if (heap[k][0] < heap[m][0] || (heap[k][0] === heap[m][0] && heap[k][1] < heap[m][1])) m = k;
+      const [d, i] = heap.splice(m, 1)[0];
+      if (d > dist[i]) continue;
+      const x = i % W, y = (i / W) | 0;
+      for (const [dx, dy] of full.D8) {
+        if (!full.canStep(x, y, dx, dy)) continue;
+        const j = (y + dy) * W + x + dx, nd = d + (dx && dy ? Math.SQRT2 : 1);
+        if (nd < dist[j]) { dist[j] = nd; heap.push([nd, j]); }
+      }
+    }
+    return dist;
+  };
   const N = world.w * world.h, walk = [];
   for (let i = 0; i < N; i++) if (world.ground[i] >= 2 && world.ground[i] <= 4) walk.push(i);
   let seed = 11;
   const rnd = () => (seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296;
   const goals = Array.from({ length: 12 }, () => walk[(rnd() * walk.length) | 0]);
+  let fieldBad = 0;
+  for (const g of goals.slice(0, 3)) { const a = full.field(g), b = reference(g); for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) fieldBad++; }
+  check(fieldBad === 0, `paths: the whole field to a goal equals a plain Dijkstra over the island (3 goals, ${fieldBad} differing tiles)`);
   for (const g of goals) full.field(g); // run to the end
   let same = 0, unreachable = 0;
   const pairs = 600;
@@ -431,7 +454,7 @@ function longRun(seed) {
     if (JSON.stringify(a) === JSON.stringify(b) && lazy.distance(s, g) === full.distance(s, g)) same++;
     if (!b) unreachable++;
   }
-  check(same === pairs && unreachable > 0, `paths: searches resumed per start match searches run to the end (${same}/${pairs} pairs, ${unreachable} unreachable)`);
+  check(same === pairs && unreachable > 0 && unreachable < pairs / 2, `paths: searches resumed per start match searches run to the end (${same}/${pairs} pairs, ${unreachable} unreachable)`);
 }
 
 // ---------------------------------------------------------------------------------------------

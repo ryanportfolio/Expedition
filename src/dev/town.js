@@ -14,14 +14,15 @@ const PER = { field: 15, storehouse: 100, woodpile: 100 };
 const STOCK = { wood: 20000, grain: 10000 };
 /** House blueprints kept open in the player town, per villager. */
 export const OPEN_PER = 15;
-/** Town reach in tiles from the village centre. */
-const TOWN_R = 40;
-/** Candidate centre tiles within TOWN_R of a village's centre, nearest first (ties: row, column). */
-export function townSpots(vill) {
+/** Town reach in tiles from the village centre: room for the town and its open sites, growing with
+ * the square root of its population (600 villagers fill about 30 tiles round the centre). */
+const townReach = (pop) => Math.max(40, Math.ceil(2 * Math.sqrt(pop)));
+/** Candidate centre tiles within R of a village's centre, nearest first (ties: row, column). */
+export function townSpots(vill, R) {
   const cx = Math.floor(vill.cx), cy = Math.floor(vill.cy), out = [];
-  for (let dy = -TOWN_R; dy <= TOWN_R; dy++) for (let dx = -TOWN_R; dx <= TOWN_R; dx++) {
+  for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
     const d = Math.hypot(dx, dy);
-    if (d <= TOWN_R) out.push({ tx: cx + dx, ty: cy + dy, d });
+    if (d <= R) out.push({ tx: cx + dx, ty: cy + dy, d });
   }
   return out.sort((a, b) => a.d - b.d || a.ty - b.ty || a.tx - b.tx);
 }
@@ -43,8 +44,9 @@ function finish(b, k) {
  * placement (placeBlueprint: influence, ground, no overlap, no tree or rock in the way) on the
  * nearest free spot with a 1-tile margin round it, outside `keepOut(x, y)`, the kind furthest behind
  * its count first, and is finished at once (finish). Then villagers are spawned in the houses until
- * the town holds `pop`; the village adopts them on its next tick. Returns the spot list and the next
- * index in it, for the open sites the tick hook places later.
+ * the town holds `pop`; the village adopts them on its next tick. Returns { owner, spots, next,
+ * want, have, keepOut }: the spot list and the next index in it are where keepSites goes on; a kind
+ * with have < want means the town did not fit in its reach.
  */
 export function buildTown(game, owner, pop, keepOut) {
   const { world } = game, sim = game.systems.village.sim;
@@ -52,7 +54,7 @@ export function buildTown(game, owner, pop, keepOut) {
   const want = { house: Math.ceil(pop / KINDS.house.cap), field: Math.ceil(pop / PER.field), storehouse: Math.ceil(pop / PER.storehouse), woodpile: Math.ceil(pop / PER.woodpile) };
   const have = Object.fromEntries(Object.keys(want).map((k) => [k, mine(k).length]));
   for (const t of ['woodpile', 'storehouse']) for (const b of mine(t)) finish(b, 0); // the start stores get the town's stock
-  const spots = townSpots(sim.village(owner));
+  const spots = townSpots(sim.village(owner), townReach(pop));
   let i = 0;
   for (; i < spots.length; i++) {
     const order = Object.keys(want).filter((k) => have[k] < want[k]).sort((a, b) => have[a] / want[a] - have[b] / want[b]);
@@ -71,5 +73,19 @@ export function buildTown(game, owner, pop, keepOut) {
     const h = houses[k % houses.length], c = (k / houses.length) | 0; // the house's four tiles in turn
     world.spawn('villager', { x: h.tx + 0.5 + (c & 1), y: h.ty + 0.5 + ((c >> 1) & 1), owner, hp: 1, grabbable: true, flammable: false, burning: 0 });
   }
-  return { spots, next: i, want, have };
+  return { owner, spots, next: i, want, have, keepOut };
+}
+
+/** Keeps `open` house blueprints of `town`'s owner open (a blueprint or a site under way), placing
+ * new ones at the town's next free spots. Returns how many are open. */
+export function keepSites(game, town, open) {
+  const { world } = game, vs = game.systems.village;
+  const isOpen = (b) => b.owner === town.owner && (b.stage === 'blueprint' || b.stage === 'building') && b.hp > 0;
+  let n = world.query({ kind: 'building' }).filter(isOpen).length;
+  for (; n < open && town.next < town.spots.length; town.next++) {
+    const { tx, ty } = town.spots[town.next];
+    if (town.keepOut(tx + 0.5, ty + 0.5) || !vs.sim.validate('house', tx, ty, town.owner, { margin: 1 }).ok) continue;
+    if (vs.placeBlueprint('house', tx, ty, town.owner) !== null) n++;
+  }
+  return n;
 }

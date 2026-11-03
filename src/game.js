@@ -73,6 +73,8 @@ export function createGame({ seed = 1, canvas = null, worldSize = 64 } = {}) {
   // the why), at the center of the world pixel under it. The tile heights are rebuilt when the map
   // changes: world.loadMap swaps the height and ground arrays; an in-place edit of them must call
   // game.surface.invalidate() (terrain.invalidate() does), as the terrain cache needs too.
+  // Pathfinding (src/village/path.js, src/creature/path.js) works out its allowed steps once per
+  // height array and does not follow an in-place edit; nothing in the game edits the map in place.
   let surface = null;
   game.surface = {
     get() {

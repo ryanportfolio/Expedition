@@ -76,7 +76,7 @@ export default async function island(t, game) {
 
   t.assert(world.w === 64 * SCALE && world.h === 64 * SCALE && world.sites.village, `terrain system loaded the island (${world.w}x${world.h})`);
   const rocks = world.query({ kind: 'rock' });
-  t.assert(rocks.length === world.rocks.length && rocks.length >= 20, `one rock entity per map rock (${rocks.length} of ${world.rocks.length})`);
+  t.assert(rocks.length === world.rocks.length && rocks.length >= 20 * SCALE * SCALE, `one rock entity per map rock (${rocks.length} of ${world.rocks.length})`);
   t.assert(rocks.every((r) => r.grabbable === true && r.hp === 1 && r.sprite && r.sprite.h >= 4), 'rock entities carry size, grabbable, hp and a sprite');
 
   const check = (label) => {
@@ -99,7 +99,7 @@ export default async function island(t, game) {
   vs.setup();
   t.step(1);
   const trees = world.query({ kind: 'tree' });
-  t.assert(trees.length === world.trees.length && trees.length >= 150, `village spawned the trees (${trees.length})`);
+  t.assert(trees.length === world.trees.length && trees.length >= 100 * SCALE * SCALE, `village spawned the trees (${trees.length})`);
   t.assert(world.query({ kind: 'rock' }).length === rocks.length, 'village setup kept the rock entities');
 
   // Overview at scale 2 (the step that shows the most), centered on the island.

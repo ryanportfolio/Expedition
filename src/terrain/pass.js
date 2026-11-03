@@ -31,8 +31,11 @@ export function drawTerrain(ctx, cache, time) {
   if (vx0 >= vx1 || vy0 >= vy1) return 0;
   if (cache.data) { copy(ctx, cache.data, CW, 0, 0, dx, dy, vx0, vx1, vy0, vy1, step); return 0; }
   const built = cache.built;
-  for (let cj = Math.floor((vy0 + dy) / CHUNK), cj1 = Math.floor((vy1 - 1 + dy) / CHUNK); cj <= cj1; cj++) {
-    for (let ci = Math.floor((vx0 + dx) / CHUNK), ci1 = Math.floor((vx1 - 1 + dx) / CHUNK); ci <= ci1; ci++) {
+  const ci0 = Math.floor((vx0 + dx) / CHUNK), ci1 = Math.floor((vx1 - 1 + dx) / CHUNK);
+  const cj0 = Math.floor((vy0 + dy) / CHUNK), cj1 = Math.floor((vy1 - 1 + dy) / CHUNK);
+  cache.keep = Math.max(cache.keep, 2 * (ci1 - ci0 + 3) * (cj1 - cj0 + 3)); // the view and its prefetch ring, twice
+  for (let cj = cj0; cj <= cj1; cj++) {
+    for (let ci = ci0; ci <= ci1; ci++) {
       const cx0 = ci * CHUNK, cy0 = cj * CHUNK; // the chunk's cache pixel origin
       copy(ctx, cache.chunk(ci, cj), CHUNK, cx0, cy0, dx, dy,
         Math.max(vx0, cx0 - dx), Math.min(vx1, cx0 + CHUNK - dx), Math.max(vy0, cy0 - dy), Math.min(vy1, cy0 + CHUNK - dy), step);

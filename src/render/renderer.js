@@ -34,6 +34,9 @@ export function createRenderer(game) {
     clearColor: rgba('#0b1730'),
     /** Default LUT (Uint32Array(256)); the alignment system swaps it. */
     lut: new Uint32Array(256),
+    /** Draw only the entity sprites that overlap the view (spriteInView). Checks turn it off to
+     * compare a frame against the same frame with every sprite drawn. */
+    cull: true,
     get view() { return view; },
     list,
     /** fn(ctx) runs after clear and before entities. Returns an unregister function. */
@@ -46,7 +49,7 @@ export function createRenderer(game) {
       if (view.w !== display.w || view.h !== display.h) view = createViewBuffer(display.w, display.h);
       const camX = Math.round(camera.x), camY = Math.round(camera.y);
       const ctx = {
-        buf: view.data, w: view.w, h: view.h, view, camX, camY, lut: renderer.lut, world, list, game,
+        buf: view.data, w: view.w, h: view.h, view, camX, camY, lut: renderer.lut, world, list, game, cull: renderer.cull,
         blit: (sprite, vx, vy, flipX = false, lut = renderer.lut) => blit(view.data, view.w, view.h, sprite, vx, vy, lut, flipX),
         toView: (x, y, z = 0) => { const p = worldToScreen(x, y, z); return { vx: Math.round(p.sx - camX), vy: Math.round(p.sy - camY) }; },
         overlay: (fn) => overlays.push(fn),
@@ -56,7 +59,7 @@ export function createRenderer(game) {
       list.clear();
       overlays.length = 0;
       for (const name of game.systemOrder) systems[name].draw(ctx);
-      for (const e of world.entities.values()) if (e.sprite && spriteInView(e, camX, camY, view.w, view.h)) list.push(e);
+      for (const e of world.entities.values()) if (e.sprite && (!renderer.cull || spriteInView(e, camX, camY, view.w, view.h))) list.push(e);
       fx.draw(view, camX, camY, 'back');
       list.draw(ctx);
       fx.draw(view, camX, camY, 'front');

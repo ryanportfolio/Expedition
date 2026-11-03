@@ -26,7 +26,8 @@ const { createGame } = await import('../src/game.js');
 const { buildIsland } = await import('../src/world/island.js');
 // Spots below are written as offsets from the player village's 64 x 64 centre (20, 40); OX, OY move
 // them to where the village stands on the island now.
-const OX = buildIsland().sites.village.x - 20, OY = buildIsland().sites.village.y - 40;
+const { village: V0 } = buildIsland().sites;
+const OX = V0.x - 20, OY = V0.y - 40;
 const { HAND } = await import('../src/systems/hand.js');
 const { stepBody, apexHeight, flatRange, predictLanding } = await import('../src/hand/flight.js');
 const { createStrokeTracker } = await import('../src/hand/stroke.js');
@@ -523,7 +524,7 @@ section('stroke, slap, select and tether', () => {
   ok(game.state.selectedCreature === c.id, 'left click on the creature selects it');
   step(1 / 30);
   ok(hand.state.pose === 'hand-point', `pose while a creature is selected: ${hand.state.pose}`);
-  const gx = 19.5, gy = 44.5;
+  const gx = OX + 19.5, gy = OY + 44.5;
   moveTo(f.camera.worldToView(gx, gy, world.heightAt(gx, gy)));
   n = f.log.length;
   s.down(2); s.up(2);

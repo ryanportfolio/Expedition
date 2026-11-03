@@ -75,7 +75,7 @@ Each system keeps its internals in a folder of the same name under `src/` (`src/
 
 | Module | Job |
 |---|---|
-| `terrain.js` | Loads the island when the world has no map, draws land, water and cliffs from a cached buffer kept in 128 px chunks that are painted the first time the view reaches them, and spawns the map's rocks. |
+| `terrain.js` | Loads the island when the world has no map, draws land, water and cliffs from a cached buffer kept in 128 px chunks, painted when the view first needs them and kept in a least-recently-used set of at least 256 (more for very large views), and spawns the map's rocks. |
 | `village.js` | Both villages: villagers, jobs, hauling, building from blueprints, fields and worship power in `game.state.power`. Inert until `setup()`. |
 | `creature.js` | The giant: senses the world, lets its brain (`src/creature/brain.js`) pick an action, walks there and acts; learns from strokes and slaps; follows tethers. Inert until `setup()`. |
 | `hand.js` | The player's hand: grab, carry, drop and throw with arcs and shadows, stroke, slap and tether the creature. |
@@ -187,24 +187,26 @@ The scene boots like play, then builds a town round each village through the vil
 - Heal, every 2.5 s, on the village centre.
 - Lightning, every 2.5 s, beside the village: the spot within 14 tiles of the village centre, nearest it, that keeps the bolt off buildings, lights no fire that could reach one, and stands at least 3.2 tiles from every villager where such a spot exists (else the spot farthest from them), so none can walk into the kill radius before the bolt lands.
 
-The check exits 1 when p95 is over budget or when the scene is no longer the worst case at the end of the window: player houses standing must be at least the count at window start minus 1, player villagers at least 80% of the start count, and each of the four miracle effects alive on every sim tick of the last 2 s. Two edited copies of the scene confirmed that this check can fail: one that aimed fire at the houses after its first cast lost 2 of 4 houses during the window, and one with lightning cast every 9 s had no live strike on 60 ticks of the last 2 s. Both exited 1 while their p95 stayed at 10.1 to 10.2 ms.
+The check exits 1 when p95 is over budget or when the scene is no longer the worst case at the end of the window: player houses standing must be at least the count at window start minus 1, player villagers at least 80% of the start count, and each of the four miracle effects alive on every sim tick of the last 2 s. Two edited copies of the earlier 12-villager scene confirmed that this check can fail: one that aimed fire at the houses after its first cast lost 2 of 4 houses during the window, and one with lightning cast every 9 s had no live strike on 60 ticks of the last 2 s. Both exited 1 while their p95 stayed at 10.1 to 10.2 ms. The scene also asserts that both towns were built in full and that all 40 house sites are open, so a town that does not fit (a larger `--town`) fails the run instead of measuring a lighter scene.
 
-Measured on this machine (100 Hz display, 2026-11-02), seed 1, three runs one after another, and one run with towns of 1,000 and 200. The scene is deterministic: every run cast rain 3 times, fire 6, heal 8 and lightning 8 in the window, kept every house, building and villager on every tick (a birth added one villager), and had all four effects alive on every tick.
+Measured on this machine (100 Hz display, 2026-11-02), seed 1, three runs one after another. The scene is deterministic: every run cast rain 3 times, fire 6, heal 8 and lightning 8 in the window, kept every house, building and villager on every tick (a birth added one villager), and had all four effects alive on every tick.
 
-| | Run A | Run B | Run C | 1,000 + 200 villagers |
-|---|---|---|---|---|
-| Entities at window end | 2,708 | 2,708 | 2,708 | 3,289 |
-| Frame time median / p95 / p99 / max | 10.0 / 10.2 / 20.0 / 20.3 ms | 10.0 / 10.1 / 10.3 / 20.1 ms | 10.0 / 10.2 / 10.3 / 30.1 ms | 10.0 / 10.2 / 19.8 / 20.2 ms |
-| Frames over 16.7 ms | 39 (1.99%) | 6 (0.30%) | 12 (0.60%) | 20 (1.01%) |
-| `game.frame` work, median / p95 | 4.5 / 17.7 ms | 4.2 / 16.4 ms | 4.3 / 16.9 ms | 4.4 / 17.3 ms |
-| Frames that ran a sim tick: work median / p95 / max | 15.2 / 20.2 / 26.9 ms | 14.2 / 17.9 / 28.4 ms | 14.5 / 18.6 / 33.0 ms | 14.6 / 19.0 / 25.1 ms |
-| Effects composite on those frames, back + front (median) | 2.3 + 8.3 ms | 2.3 + 7.8 ms | 2.3 + 7.8 ms | 2.6 + 7.7 ms |
+| | Run A | Run B | Run C |
+|---|---|---|---|
+| Entities at window end | 2,707 | 2,707 | 2,707 |
+| Frame time median / p95 / p99 / max | 10.0 / 10.1 / 10.2 / 50.1 ms | 10.0 / 10.1 / 10.2 / 20.1 ms | 10.0 / 10.1 / 20.0 / 30.0 ms |
+| Frames over 16.7 ms | 13 (0.66%) | 7 (0.35%) | 60 (3.09%) |
+| `game.frame` work, median / p95 | 4.0 / 15.9 ms | 3.9 / 15.8 ms | 4.3 / 18.2 ms |
+| Frames that ran a sim tick: work median / p95 / max | 13.7 / 17.7 / 60.6 ms | 13.4 / 17.3 / 24.5 ms | 14.4 / 21.5 / 27.6 ms |
+| Effects composite on those frames, back + front (median) | 2.3 + 7.5 ms | 2.3 + 7.4 ms | 2.4 + 7.9 ms |
 
-Everything else in a render costs about 3 ms at 600 villagers: sort and blit 1.6 (about 800 sprites in view), terrain 0.6, systems draw 0.3, overlays 0.3. Sim ticks take about 0.7 to 0.9 ms each. Rain falls on the player building in view farthest from the first fire; before that rule the farthest building of all was chosen, which in the town stands off screen, and the clouds were not drawn (work p95 was 15.2 ms then).
+Everything else in a render costs about 3 ms at 600 villagers: sort and blit 1.6 (about 800 sprites in view), terrain 0.5, systems draw 0.3, overlays 0.2. Sim ticks take about 0.5 to 0.6 ms each.
+
+A town of 1,000 does not fit round the start village with its 67 open house sites: the village stands about 20 tiles from the south coast, and with `--town 1000 --rival 200` the scene stops at its setup asserts (47 of 67 sites open). A run before those asserts existed measured p95 10.2 ms at that size, but it had only 47 of its 67 fields and no open sites, so it was a lighter scene than its size suggests. Rain falls on the player building in view farthest from the first fire; before that rule the farthest building of all was chosen, which in the town stands off screen, and the clouds were not drawn (work p95 was 15.2 ms then).
 
 ### Crowds (step 2)
 
-Before step 2 the scene was the 64 x 64 island with 12 villagers. The same engine on the 192 x 192 island with the 600 + 120 towns measured p95 19.9 ms and failed the budget: `game.frame` work p95 19.8 ms, sort and blit 2.6 ms over all 2,685 entities, and sim ticks with spikes past 7 ms. Five changes, each measured on its own (`node scripts/sim-bench.mjs`, 640 x 360 view over the player town, numbers in ms):
+Before step 2 the scene was the 64 x 64 island with 12 villagers. The same engine on the 192 x 192 island with the 600 + 120 towns measured p95 19.9 ms and failed the budget: `game.frame` work p95 19.8 ms, sort and blit 2.6 ms over all 2,685 entities, and sim ticks with spikes past 7 ms. Five changes, each measured on its own (`node scripts/sim-bench.mjs`, 640 x 360 view over the player town, numbers in ms; the bench did not yet keep house sites open, so no builders hauled; with the 40 sites open the village tick now measures p95 0.35 ms):
 
 | Change | Before | After |
 |---|---|---|
@@ -214,7 +216,9 @@ Before step 2 the scene was the 64 x 64 island with 12 villagers. The same engin
 | Shared typed heap and per-map step masks for the creature's paths (`src/creature/path.js`) | 2.64 per field | 0.96 (tick max 7.7 to 3.8) |
 | `world.query({ kind })` walks that kind alone (`src/world/world.js`) | 0.31 per tick on average, p95 0.43 | 0.21, p95 0.37 |
 
-None of them changes what the sim does: 2,000 random path requests on the island give the same paths and distances as the old whole-map search, the creature's fields are identical, and a 120 s replay with 480 villagers ends in the same state with the old and the new code. The terrain cache, which took 0.6 s and 20 MB to build for the whole island at load, is now painted in 128 px chunks the first time the view reaches them, about 0.5 ms each, with each chunk byte for byte what the whole build holds (`scripts/check-terrain.mjs` compares all 1,200).
+None of them changes what the sim does: 2,000 random path requests on the island give the same paths and distances as the old whole-map search, the creature's fields are identical, and a 120 s replay with 480 villagers ends in the same state with the old and the new code. The terrain cache, which took 0.6 s and 20 MB to build for the whole island at load, is now painted in 128 px chunks when the view needs them (a chunk dropped from the set of at least 256 kept is painted again), about 0.5 ms each, with each chunk byte for byte what the whole build holds (`scripts/check-terrain.mjs` compares all 1,200). `scripts/check-render.mjs` renders the town at every zoom step with culling on and off and requires identical pixels.
+
+The gate measures zoom 1, a 640 x 360 view. Zoomed all the way out (scale 2 at 1080p, a 960 x 540 view, measured with `--window 2880x1620`), the scene fails the budget: p95 20.0 ms with 239 frames (13.7%) over 16.7 ms, and work on sim-tick frames at median 17.7, p95 24.2 ms. The same view with no towns passes at p95 10.1 ms, but its sim-tick frames already reach p95 19.2 ms: the effects cost 3.3 + 8.3 ms at that size. The towns add about 3 ms, mostly sort and blit (0.5 to 2.9 ms for about 1,000 sprites). Making the zoomed-out view fit is follow-up work on the effects layer and sprite drawing.
 
 The effects layer (`src/render/fx.js`) was 11.5 of the 12.8 ms a frame took before it was optimized. Two changes, neither of which changes a pixel:
 
@@ -223,4 +227,4 @@ The effects layer (`src/render/fx.js`) was 11.5 of the 12.8 ms a frame took befo
 
 Checked with a seeded random comparison (296,000 pixels, every alpha and light case, 0 differences) and a node replay of 400 frames with casts, camera pans and an option changed between ticks, rendered through the old and the new layer: the outputs differ only on the two frames where re-rendering after a cast differs in the old layer too. In the scene of that time (fire on houses first, which left every house a wreck about 10 s into the window), p95 went from 20.1 ms to 10.1 ms and the frames over 16.7 ms from 490 to 0.
 
-The margin is on frames that also run a sim tick: those repaint every effect, and pixelfx painting is most of their 12 ms. Their p95 of 17.9 to 20.2 ms (19.0 ms with 1,000 villagers) is over a 60 Hz frame, and the effects are most of it. On this 100 Hz display, where a frame lasts 10 ms, the rAF callback that follows such a frame runs late; the check prints those callback gaps too (p95 about 21 to 22 ms here). The rAF timestamps still advance every 10 ms except on the 6 to 39 frames per run that show a 20 ms gap, so p95 holds. A slower CPU would cross 16.7 ms on these frames first.
+The margin is on frames that also run a sim tick: those repaint every effect, and pixelfx painting is most of their 12 ms. Their p95 of 17.3 to 21.5 ms is over a 60 Hz frame, and the effects are most of it. On this 100 Hz display, where a frame lasts 10 ms, the rAF callback that follows such a frame runs late; the check prints those callback gaps too (p95 about 21 to 22 ms here). The rAF timestamps still advance every 10 ms except on the 7 to 60 frames per run that show a 20 ms or longer gap, so p95 holds. A slower CPU would cross 16.7 ms on these frames first.
