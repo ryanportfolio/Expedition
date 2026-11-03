@@ -1,4 +1,4 @@
-// Villager painter: `villager { job, pose, frame, facing, owner }`, about 10 px tall standing.
+// Villager painter: `villager { job, pose, frame, facing, owner, glow }`, about 10 px tall standing.
 //
 // A villager is assembled from parts on a small grid: head (3 x 3), torso (3 wide, belt, hem),
 // legs from a per-pose set, and two arms drawn as 1 px lines from the shoulders to per-frame hand
@@ -8,9 +8,12 @@
 // the job's tool in front of it. The body gets an ink outline; tools are drawn after the outline
 // so a 1 px handle stays 1 px.
 //
-// Jobs read at a glance by tool and dress: farmer = straw hat + hoe, woodcutter = rolled sleeves
+// Jobs read at a glance by tool and dress: farmer = straw hat + hoe, forester = rolled sleeves
 // + axe, miner = dark cap + pick, builder = leather apron + mallet, worshipper = pale hood and long
-// robe, idle = plain.
+// robe, breeder = rose headscarf, idle = plain.
+// `glow` (a job set by the hand, step 4 of docs/gameplay-spec.md): the outline is drawn in the job's
+// colour (JOB_GLOW) instead of ink. Every glow ramp is one that does not shift with alignment, so a
+// job's colour reads the same in a good and an evil town.
 // Cloth uses `cloth-player` or `cloth-rival` (owner); everything else uses ramps that do not
 // shift with alignment except the player's cloth, so the rival never changes with the player.
 //
@@ -20,7 +23,12 @@
 import { idx } from '../palette.js';
 import { createSprite, line, mirror, outline, px, trim } from '../sprite.js';
 
-const JOBS = ['farmer', 'woodcutter', 'miner', 'builder', 'worshipper', 'idle'];
+const JOBS = ['farmer', 'forester', 'miner', 'builder', 'worshipper', 'breeder', 'idle'];
+
+/** Outline colour [ramp, shade] of a villager whose job the hand set, by job. */
+export const JOB_GLOW = Object.freeze({
+  farmer: ['fire', 5], forester: ['heal', 4], miner: ['ink', 6], builder: ['clay', 5], worshipper: ['lightning', 5], breeder: ['rose', 5],
+});
 const POSES = ['idle', 'walk', 'work', 'carry', 'pray', 'flee', 'dead'];
 const FACINGS = ['se', 'sw', 'ne', 'nw'];
 
@@ -79,7 +87,7 @@ function walkFrame(f) {
 // Tool held while standing or walking, by job: grip and angle relative to the body.
 const HOLD = {
   farmer: { idle: { front: [6, 5], grip: [6, 5], angle: 90, len: 9 }, walk: { front: [7, 4], grip: [7, 4], angle: 80, len: 9 } },
-  woodcutter: { idle: { front: [6, 5], grip: [6, 5], angle: -75, len: 4 }, walk: { front: [6, 5], grip: [6, 5], angle: -65, len: 4 } },
+  forester: { idle: { front: [6, 5], grip: [6, 5], angle: -75, len: 4 }, walk: { front: [6, 5], grip: [6, 5], angle: -65, len: 4 } },
   miner: { idle: { front: [6, 5], grip: [6, 5], angle: -80, len: 5 }, walk: { front: [6, 4], grip: [6, 4], angle: 120, len: 5 } },
   builder: { idle: { front: [7, 3], grip: [7, 3], angle: 105, len: 4 }, walk: { front: [7, 3], grip: [7, 3], angle: 115, len: 4 } },
 };
@@ -103,7 +111,7 @@ const SWING = {
 };
 const TOOL = {
   farmer: { kind: 'hoe', swing: 'hoe', len: 8 },
-  woodcutter: { kind: 'axe', swing: 'chop', len: 6 },
+  forester: { kind: 'axe', swing: 'chop', len: 6 },
   miner: { kind: 'pick', swing: 'chop', len: 5 },
   builder: { kind: 'mallet', swing: 'chop', len: 4 },
 };
@@ -148,7 +156,7 @@ function frameSpec(job, pose, f) {
 // ---- colors ----------------------------------------------------------------------------------
 
 const HAIR = {
-  farmer: ['ui-ink', 2], woodcutter: ['ink', 1], miner: ['ink', 2], builder: ['skin', 1], worshipper: ['ui-ink', 2], idle: ['ui-ink', 3],
+  farmer: ['ui-ink', 2], forester: ['ink', 1], miner: ['ink', 2], builder: ['skin', 1], worshipper: ['ui-ink', 2], breeder: ['ink', 3], idle: ['ui-ink', 3],
 };
 
 function palette(job, owner) {
@@ -165,6 +173,7 @@ function palette(job, owner) {
     // dress
     hat: idx('thatch', 6), hatS: idx('thatch', 4), hatD: idx('thatch', 3),
     cap: idx('ui-ink', 2), capS: idx('ui-ink', 1),
+    scarf: idx('rose', 4), scarfS: idx('rose', 3),
     hood: idx('ui-parchment', 6), hoodS: idx('ui-parchment', 4),
     robe: idx(cloth, 3), robeS: idx(cloth, 2),
     apron: idx('ui-parchment', 3), apronS: idx('ui-parchment', 2),
@@ -234,10 +243,14 @@ function dress(job, fig) {
     // Close dark cap pulled over the hair, a peak over the brow on the facing side.
     for (let x = 3; x <= 5; x++) body.push([x + lean, headTop, x === 5 ? 'capS' : 'cap']);
     body.push([6 + lean, headTop + 1, 'capS']);
+  } else if (job === 'breeder') {
+    // Rose headscarf over the hair, tied at the back of the head.
+    for (let x = 3; x <= 5; x++) body.push([x + lean, headTop, x === 5 ? 'scarfS' : 'scarf']);
+    body.push([2 + lean, headTop + 1, 'scarfS']);
   } else if (job === 'builder') {
     // Leather apron down the front of the tunic.
     body.push([4, 4 + dy, 'apron'], [4, 5 + dy, 'apron'], [5, 5 + dy, 'apronS'], [4, 6 + dy, 'apron'], [5, 6 + dy, 'apronS']);
-  } else if (job === 'woodcutter') {
+  } else if (job === 'forester') {
     // Rolled sleeves: forearms bare.
     for (const layer of [parts.back, parts.front]) {
       layer.forEach((p, i) => {
@@ -314,11 +327,12 @@ function villager(opts = {}) {
   const owner = opts.owner === 'rival' ? 'rival' : 'player';
   const f = ((Math.floor(Number(opts.frame) || 0) % 4) + 4) % 4;
   const c = palette(job, owner);
+  const glow = opts.glow && JOB_GLOW[job] ? idx(...JOB_GLOW[job]) : idx('ink', 0);
   const flip = facing === 'sw' || facing === 'nw';
 
   let s;
   if (pose === 'dead') {
-    s = trim(outline(deadFigure(job, owner), idx('ink', 0)));
+    s = trim(outline(deadFigure(job, owner), idx('ink', 0))); // the dead lose their glow
   } else {
     const fig = assemble(job, pose, f, facing === 'nw' ? 'ne' : facing === 'sw' ? 'se' : facing);
     dress(job, fig);
@@ -328,7 +342,7 @@ function villager(opts = {}) {
     paint(fig.parts.body);
     paint(fig.parts.front);
     // Hands that reach behind the head stay visible; the outline wraps the whole figure.
-    s = outline(body, idx('ink', 0), { grow: false });
+    s = outline(body, glow, { grow: false });
     if (fig.spec.tool) drawTool(s, fig.spec.tool, OX, OY, fig.dy, c);
     s = trim(s);
   }
@@ -343,6 +357,7 @@ const pv = [];
 for (const pose of POSES) for (let frame = 0; frame < (pose === 'dead' || pose === 'idle' ? 1 : 4); frame++) pv.push({ job: 'farmer', pose, frame, facing: 'se', owner: 'player' });
 for (const job of JOBS) for (let frame = 0; frame < 4; frame++) pv.push({ job, pose: 'work', frame, facing: 'se', owner: 'player' });
 for (const job of JOBS) pv.push({ job, pose: 'idle', frame: 0, facing: 'se', owner: 'player' }, { job, pose: 'walk', frame: 0, facing: 'ne', owner: 'rival' });
-for (const facing of FACINGS) pv.push({ job: 'woodcutter', pose: 'walk', frame: 1, facing, owner: 'rival' });
+for (const facing of FACINGS) pv.push({ job: 'forester', pose: 'walk', frame: 1, facing, owner: 'rival' });
 for (let frame = 0; frame < 4; frame++) pv.push({ job: 'builder', pose: 'carry', frame, facing: 'sw', owner: 'player' });
+for (const job of Object.keys(JOB_GLOW)) pv.push({ job, pose: 'walk', frame: 1, facing: 'se', owner: 'player', glow: true });
 export const previews = { villager: pv };

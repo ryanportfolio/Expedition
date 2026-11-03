@@ -31,7 +31,7 @@ const REQUIRED = ['ink', 'grass', 'dirt', 'sand', 'rock', 'water', 'foliage', 'b
   'cloth-player', 'cloth-rival', 'creature-hide', 'creature-accent', 'hand-glow', 'grain', 'fire', 'heal', 'lightning',
   'ui-parchment', 'ui-ink', 'shadow', 'heart'];
 const MUST_SHIFT = ['grass', 'dirt', 'sand', 'rock', 'water', 'foliage', 'bark', 'thatch', 'stone', 'creature-hide', 'creature-accent', 'hand-glow', 'heart'];
-const MUST_NOT_SHIFT = ['ink', 'skin', 'ui-parchment', 'ui-ink'];
+const MUST_NOT_SHIFT = ['ink', 'skin', 'ui-parchment', 'ui-ink', 'rose'];
 check('ramp count 1..31', RAMPS.length >= 1 && RAMPS.length <= 31 && MAX_RAMPS === 31, `have ${RAMPS.length}`);
 eq('8 shades', SHADES, 8);
 for (const n of REQUIRED) check(`ramp "${n}" present`, n in RAMP);
@@ -307,6 +307,23 @@ check('neutral ramps identical across all 17 alignments', neutralSame);
         check(`painter ${f} "${name}" ${registry.stableKey(opts)} paints`, sp !== registry.placeholderSprite() && count(sp) > 0);
         check(`painter "${name}" uses valid indices`, sp.data.every((v) => v === 0 || v <= RAMPS.length * 8));
       }
+    }
+  }
+  // Step 4: a villager whose job the hand set is outlined in its job's colour, the same colour at
+  // every alignment, and no two jobs share one.
+  {
+    const { JOB_GLOW } = await load('src/art/painters/villagers.js');
+    const evil = makeLut(-1), good = makeLut(1);
+    const seen = new Set();
+    for (const [job, [ramp, shade]] of Object.entries(JOB_GLOW)) {
+      const gi = idx(ramp, shade);
+      const opts = { job, pose: 'walk', frame: 1, facing: 'se', owner: 'player' };
+      const lit = registry.getSprite('villager', { ...opts, glow: true }), plain = registry.getSprite('villager', opts);
+      check(`${job} glow outlines the figure in ${ramp} ${shade}`, lit.data.filter((v) => v === gi).length >= 20 && !plain.data.includes(gi) &&
+        lit.data.every((v, i) => v === plain.data[i] || (v === gi && plain.data[i] === idx('ink', 0))));
+      check(`${job} glow is the same colour good and evil`, evil[gi] === good[gi], `${rgbaOf(evil, gi)} vs ${rgbaOf(good, gi)}`);
+      check(`${job} glow colour is its own`, !seen.has(good[gi]));
+      seen.add(good[gi]);
     }
   }
   const fig = registry.getSprite('test-figure');

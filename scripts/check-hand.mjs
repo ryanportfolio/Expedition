@@ -747,7 +747,7 @@ section('the hand in bulk', () => {
   step(0.2); s.up(0); step(1);
 
   // multi pick-up of trees, let go over the store: all their wood goes in at once. Villagers stand
-  // still meanwhile: since step 3 the store also takes the woodcutters' loads, which would land in
+  // still meanwhile: since step 3 the store also takes the foresters' loads, which would land in
   // the same window.
   const still = world.query({ kind: 'villager' });
   for (const v of still) { v.path = null; v.work = null; v.wait = 60; }
@@ -945,12 +945,40 @@ section('update and input handlers never touch the DOM or Math.random', () => {
   }
 });
 
+// Step 4: jobs by hand. Through the real hand: a slow drop by a field sets the farmer job for good, a
+// throw leaves it, a shake clears it and hands the villager back to automatic assignment.
+section('jobs by hand: drop sets, throw keeps, shake clears', () => {
+  const f = setup();
+  const { game, world, camera, s, step, middle, moveTo, flick } = f;
+  const vs = game.systems.village;
+  vs.setup();
+  const hs = game.systems.hand;
+  const field = world.query({ kind: 'building' }).find((b) => b.owner === 'player' && b.type === 'field' && b.stage === 'done');
+  camera.centerOn(field.x, field.y, world.heightAt(field.x, field.y));
+  const fig = getSprite('test-figure');
+  const v = world.query({ kind: 'villager' }).find((u) => u.owner === 'player' && u.job !== 'farmer');
+  const hold = () => { v.sprite = fig; v.path = null; v.wait = 60; moveTo(middle(v)); s.down(0); step(0.3); };
+  const overField = () => { const p = camera.worldToView(field.x, field.y, world.heightAt(field.x, field.y)); moveTo({ sx: p.sx, sy: p.sy }); step(0.4); };
+  // a slow drop over the field
+  hold(); overField(); s.up(0); step(2);
+  ok(v.job === 'farmer' && v.byHand, `a villager dropped slowly on a field is a farmer by hand (${v.job}, by hand ${v.byHand})`);
+  // a throw keeps the job set by hand, wherever the villager lands
+  hold(); flick(1, 0.3, 6); step(3);
+  ok(v.hp > 0 && v.job === 'farmer' && v.byHand, `a throw keeps the hand-set job (${v.job}, by hand ${v.byHand}, hp ${v.hp})`);
+  // a shake over the field clears it, and the landing by the field does not set it again
+  hold(); overField(); hs.shake(); step(2);
+  ok(!hs.state.held.length && !v.byHand, `a shake clears the hand-set job (by hand ${v.byHand})`);
+  step(4);
+  ok(!v.byHand, `back under automatic assignment after the shake (${v.job}, by hand ${v.byHand})`);
+});
+
 section('every emitted event carries its spec fields', () => {
   const num = (v) => typeof v === 'number' && Number.isFinite(v);
   const id = (v) => v !== undefined && v !== null;
   const SPEC = {
     grab: (e) => id(e.entityId) && ['x', 'y', 'z', 'vx', 'vy', 'vz'].every((k) => num(e[k])),
-    release: (e) => id(e.entityId) && ['x', 'y', 'z', 'vx', 'vy', 'vz'].every((k) => num(e[k])) && typeof e.kind === 'string' && 'miracle' in e,
+    release: (e) => id(e.entityId) && ['x', 'y', 'z', 'vx', 'vy', 'vz'].every((k) => num(e[k])) && typeof e.kind === 'string' && 'miracle' in e &&
+      typeof e.thrown === 'boolean' && typeof e.shaken === 'boolean',
     landed: (e) => id(e.entityId) && num(e.speed) && e.speed >= 0,
     stroke: (e) => id(e.creatureId) && num(e.strength) && e.strength >= 0.2 && e.strength <= 1,
     slap: (e) => id(e.creatureId) && e.strength === 1,

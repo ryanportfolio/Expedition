@@ -6,7 +6,7 @@
 // each of the player temple building's painted pedestals, and that each orb shows at least 90% of its
 // sprite pixels with the camera on the temple (screenshot temple-orbs). Before the sim runs it checks the sprite contracts
 // on the sprites themselves: building footprint widths and anchors per kind, owner and stage,
-// villager anchors on the feet for all 1120 combos, frames, jobs and owners all distinct, and
+// villager anchors on the feet for all 1568 combos, frames, jobs and owners all distinct, and
 // repaints identical to the registry's cached sprites.
 import { buildIsland } from '../../world/island.js';
 import { debugTerrainPass } from '../test-art.js';
@@ -14,13 +14,14 @@ import { lutFor, makeLut } from '../../art/lut.js';
 import { listSprites, placeholderSprite, getSprite } from '../../art/registry.js';
 import { worldToScreen } from '../../world/iso.js';
 import { TEMPLE_PEDESTALS, sprites as buildingPainters } from '../../art/painters/buildings.js';
-import { sprites as villagerPainters } from '../../art/painters/villagers.js';
+import { sprites as villagerPainters, JOB_GLOW } from '../../art/painters/villagers.js';
+import { idx } from '../../art/palette.js';
 import { KINDS } from '../../village/config.js';
 
 const OURS = { villager: 'villager', wood: 'wood', grain: 'grain' };
 const OWNERS = ['player', 'rival'];
 const STAGES = ['blueprint', 'building', 'done', 'wrecked'];
-const JOBS = ['farmer', 'woodcutter', 'builder', 'worshipper', 'idle'];
+const JOBS = ['farmer', 'forester', 'miner', 'builder', 'worshipper', 'breeder', 'idle'];
 const POSES = ['idle', 'walk', 'work', 'carry', 'pray', 'flee', 'dead'];
 const FACINGS = ['se', 'sw', 'ne', 'nw'];
 const CYCLES = ['walk', 'work', 'carry', 'pray', 'flee'];
@@ -67,7 +68,7 @@ function contractChecks(t) {
     t.assert(samePairs(crops).length === 0, `${owner} field growth 0, 0.25, 0.5, 0.75 and 1 all look different`);
   }
 
-  // Villagers: all 1120 job/pose/frame/facing/owner combos have the anchor on the feet (the
+  // Villagers: all 1568 job/pose/frame/facing/owner combos have the anchor on the feet (the
   // lowest opaque row, within 1 px for a hoe blade biting the soil) and a sane height.
   let total = 0;
   const off = [];
@@ -77,7 +78,7 @@ function contractChecks(t) {
     const low = lowestOpaqueRow(s);
     if (s === placeholderSprite() || Math.abs(low - s.ay) > 1 || s.h < 4 || s.h > 24 || s.ax < 0 || s.ax >= s.w) off.push(`${job} ${pose} ${frame} ${facing} ${owner} (feet row ${low}, anchor ${s.ax},${s.ay}, ${s.w}x${s.h})`);
   }
-  t.assert(total === 1120 && off.length === 0, `villager anchors on the feet for all ${total} combos${off.length ? `: ${off.slice(0, 6).join('; ')}` : ''}`);
+  t.assert(total === 1568 && off.length === 0, `villager anchors on the feet for all ${total} combos${off.length ? `: ${off.slice(0, 6).join('; ')}` : ''}`);
 
   // Every animated pose's 4 frames are pairwise different, for every job, facing and owner; the
   // jobs differ from each other in every pose and frame; the owners differ in every combo.
@@ -191,6 +192,61 @@ export default async function villageArt(t, game) {
   focus(site.x + 0.5, site.y - 1.5);
   checkView('player village');
   await t.shot('player-village');
+
+  // Step 4: villagers whose job the hand set glow in the job's colour, the same colour under the good
+  // and the evil LUT. A villager dropped on a house turns breeder by hand; one villager for each other
+  // job is given it by hand; all six then stand in a row on open ground beside the village, held still,
+  // and every glow pixel drawn must be the job's colour in both frames.
+  const home = world.query({ kind: 'building' }).find((b) => b.type === 'house' && b.owner === 'player' && b.stage === 'done');
+  const crowd = world.query({ kind: 'villager' }).filter((v) => v.owner === 'player' && !v.dying);
+  const breeder = crowd[0];
+  world.move(breeder, home.x, home.y, world.heightAt(home.x, home.y));
+  game.events.emit('release', { entityId: breeder.id, kind: 'villager', x: home.x, y: home.y, z: breeder.z, vx: 0, vy: 0, vz: 0, thrown: false, shaken: false });
+  t.assert(breeder.job === 'breeder' && breeder.byHand, `a villager dropped on a house is a breeder by hand (${breeder.job})`);
+  const lit = { breeder };
+  Object.keys(JOB_GLOW).filter((job) => job !== 'breeder').forEach((job, i) => { lit[job] = crowd[i + 1]; Object.assign(crowd[i + 1], { job, byHand: true }); });
+  const open = (x, y) => vs.sim.paths.walkable(Math.floor(x), Math.floor(y)) &&
+    !world.query({ kind: 'building', x, y, r: 4 }).length && !world.query({ kind: 'tree', x, y, r: 2.5 }).length;
+  let row = null;
+  for (let r = 3; r < 30 && !row; r++) for (let a = 0; a < 24 && !row; a++) {
+    const x = site.x + Math.round(Math.cos(a * Math.PI / 12) * r) + 0.5, y = site.y + Math.round(Math.sin(a * Math.PI / 12) * r) + 0.5;
+    if (Object.keys(lit).every((_, i) => open(x + i * 1.5, y))) row = { x, y };
+  }
+  t.assert(row !== null, `open ground for a row of six villagers (${row && [row.x, row.y]})`);
+  Object.values(lit).forEach((v, i) => {
+    world.move(v, row.x + i * 1.5, row.y, world.heightAt(row.x + i * 1.5, row.y));
+    Object.assign(v, { path: null, work: null, wait: 60, pose: 'idle', frame: 0, facing: 'se' });
+  });
+  focus(row.x + 3.5, row.y);
+  await t.shot('hand-jobs');
+  const glowSeen = (lut) => {
+    const ctx = renderer.render(), out = {};
+    for (const [job, v] of Object.entries(lit)) {
+      const gi = idx(...JOB_GLOW[job]), spr = v.sprite, { vx, vy } = ctx.toView(v.x, v.y, v.z);
+      let n = 0, right = 0;
+      for (let y = 0; y < spr.h; y++) for (let x = 0; x < spr.w; x++) {
+        if (spr.data[y * spr.w + x] !== gi) continue;
+        const px = vx - spr.ax + x, py = vy - spr.ay + y;
+        if (px < 0 || py < 0 || px >= display.w || py >= display.h) continue;
+        n++;
+        if (ctx.buf[py * display.w + px] === lut[gi]) right++;
+      }
+      out[job] = { n, right, color: lut[gi] };
+    }
+    return out;
+  };
+  renderer.lut = makeLut(1);
+  const good = glowSeen(makeLut(1));
+  renderer.lut = makeLut(-1);
+  const evil = glowSeen(makeLut(-1));
+  await t.shot('hand-jobs-evil');
+  renderer.lut = lutFor(0);
+  t.log('hand-set glow', { good, evil });
+  for (const job of Object.keys(JOB_GLOW)) {
+    const g = good[job], e = evil[job];
+    t.assert(g && g.n >= 10 && g.right >= 0.6 * g.n && e.right >= 0.6 * e.n && g.color === e.color,
+      `${job} by hand glows in its colour, the same good and evil (${g ? `${g.right}/${g.n} good, ${e.right}/${e.n} evil` : 'no villager'})`);
+  }
 
   // Rival village.
   focus(rival.x + 0.5, rival.y - 0.5);

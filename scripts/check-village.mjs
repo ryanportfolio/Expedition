@@ -17,12 +17,18 @@ import { createGame } from '../src/game.js';
 import { createWorld } from '../src/world/world.js';
 import { buildIsland, SCALE } from '../src/world/island.js';
 import { createRng } from '../src/engine/rng.js';
-import { VILLAGE } from '../src/village/config.js';
+import { VILLAGE, KINDS } from '../src/village/config.js';
 import { createPaths } from '../src/village/path.js';
 import { HAND } from '../src/hand/tunables.js';
 import { CREATURE } from '../src/creature/tunables.js';
 import { liveRocks } from '../src/systems/terrain.js';
 import { removeTree } from '../src/village/sim.js';
+import { registerPainters, getSprite } from '../src/art/registry.js';
+import { readdirSync } from 'node:fs';
+
+// Node has no Vite glob to register the painters: the village draw check needs them.
+const PAINTERS = new URL('../src/art/painters/', import.meta.url);
+for (const f of readdirSync(PAINTERS).filter((n) => n.endsWith('.js'))) registerPainters(await import(new URL(f, PAINTERS).href));
 
 const fails = [];
 let passes = 0;
@@ -178,8 +184,8 @@ function record(game) {
   check(v.job === 'worshipper', `villager dropped by the temple becomes a worshipper (job ${v.job})`);
   check(v.pose === 'pray' || v.path, `dropped worshipper prays or walks to pray (pose ${v.pose})`);
 
-  // Drop next to a field: farmer; next to a tree: woodcutter.
-  for (const [what, job] of [['field', 'farmer'], ['tree', 'woodcutter']]) {
+  // Drop next to a field: farmer; next to a tree: forester.
+  for (const [what, job] of [['field', 'farmer'], ['tree', 'forester']]) {
     const tgt = what === 'field' ? buildings(game, 'player', 'field').find((f) => f.stage === 'done')
       : world.query({ kind: 'tree', x: site.x, y: site.y, r: 12 })[0];
     const u = villagers(game, 'player').find((w) => w.job !== job && w.job !== 'worshipper' && w.hp > 0);
@@ -334,7 +340,7 @@ function longRun(seed) {
   check(villagers(game).length > 0 && villagers(game).every((v) => v.hp > 0), 'no starvation deaths');
   const f1 = buildings(game, 'player', 'field')[0], f2 = buildings(game, 'player', 'field')[1];
   // nobody tends or harvests: a farmer caught mid-tend keeps tending until its work is cleared too
-  for (const v of villagers(game)) { v.job = 'idle'; v.lockUntil = 1e9; v.work = null; v.path = null; }
+  for (const v of villagers(game)) { v.job = 'idle'; v.byHand = true; v.work = null; v.path = null; }
   f1.growth = 0; f2.growth = 0;
   game.events.emit('rain', { x: f1.x, y: f1.y, r: 1, dt: 1 / 30 });
   game.clock.run(10 * 30, game.tick);
@@ -468,7 +474,7 @@ function longRun(seed) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 9. Grabbing a wood carrier drops a loose, grabbable wood item that a woodcutter takes to the store.
+// 9. Grabbing a wood carrier drops a loose, grabbable wood item that a forester takes to the store.
 {
   const game = newGame();
   const { world } = game;
@@ -479,11 +485,11 @@ function longRun(seed) {
     game.tick(1 / 30);
     item = world.query({ kind: 'wood' }).find((it) => {
       const c = it.carriedBy && world.get(it.carriedBy);
-      return c && c.owner === 'player' && c.job === 'woodcutter' && clearOf(c);
+      return c && c.owner === 'player' && c.job === 'forester' && clearOf(c);
     });
     v = item ? world.get(item.carriedBy) : null;
   }
-  if (check(v, 'found a player woodcutter carrying wood away from other buildings')) {
+  if (check(v, 'found a player forester carrying wood away from other buildings')) {
     v.held = true;
     game.events.emit('grab', { entityId: v.id, x: v.x, y: v.y, z: v.z });
     game.tick(1 / 30);
@@ -500,8 +506,8 @@ function longRun(seed) {
       lastPos = { x: item.x, y: item.y };
     }
     const pile = lastPos && nearestPile(game, lastPos);
-    check(!world.get(item.id) && pickedBy === 'woodcutter' && pile && pile.d <= 2,
-      `a woodcutter carries the loose wood to the store (picked by ${pickedBy}, gone after ${(t / 30).toFixed(0)} s, ${pile ? pile.d.toFixed(1) : '?'} tiles from a store)`);
+    check(!world.get(item.id) && pickedBy === 'forester' && pile && pile.d <= 2,
+      `a forester carries the loose wood to the store (picked by ${pickedBy}, gone after ${(t / 30).toFixed(0)} s, ${pile ? pile.d.toFixed(1) : '?'} tiles from a store)`);
   }
 }
 function nearestPile(game, p) {
@@ -621,9 +627,13 @@ function runChaos(gameSeed, chaosSeed, { minutes = 10, init = null, each = null 
         v.held = true;
         game.events.emit('grab', { entityId: v.id, x: v.x, y: v.y, z: v.z });
         v.held = false;
-        game.events.emit('release', { entityId: v.id, kind: 'villager', x: v.x, y: v.y, z: v.z + 2, vx: 0, vy: 0, vz: 0 });
         const x1 = Math.min(world.w - 1.5, Math.max(1.5, v.x + rnd.range(-7, 7))), y1 = Math.min(world.h - 1.5, Math.max(1.5, v.y + rnd.range(-7, 7)));
-        flights.set(v.id, { x0: v.x, y0: v.y, x1, y1, t: 0, dur: rnd.range(0.3, 2), lethal: rnd.next() < 0.1 });
+        const f = { x0: v.x, y0: v.y, x1, y1, t: 0, dur: rnd.range(0.3, 2), lethal: rnd.next() < 0.1 };
+        // A flight at throwMin or faster is a throw, as the hand reports it, and sets no job (step 4:
+        // a slow drop sets a job for good).
+        const thrown = Math.hypot(x1 - v.x, y1 - v.y) / f.dur >= HAND.throwMin;
+        game.events.emit('release', { entityId: v.id, kind: 'villager', x: v.x, y: v.y, z: v.z + 2, vx: 0, vy: 0, vz: 0, thrown, shaken: false });
+        flights.set(v.id, f);
       } else if (roll < 0.49) {
         const bs = world.query({ kind: 'building' }).filter((b) => b.type !== 'temple' && b.stage !== 'wrecked');
         if (bs.length) bs[rnd.int(bs.length)].hp = 0;
@@ -1139,14 +1149,14 @@ const overlaps = (game) => {
   const game = newGame(1);
   const { world } = game;
   game.clock.run(30 * 30, game.tick);
-  const cutter = villagers(game, 'player').find((v) => v.job === 'woodcutter' && !v.carry) ?? villagers(game, 'player').find((v) => v.job === 'woodcutter');
+  const cutter = villagers(game, 'player').find((v) => v.job === 'forester' && !v.carry) ?? villagers(game, 'player').find((v) => v.job === 'forester');
   const at = (v) => ({ x: Math.floor(v.x) + 0.5, y: Math.floor(v.y) + 0.5 });
   const p = at(cutter);
   const flying = world.spawn('wood', { x: p.x, y: p.y, z: world.heightAt(p.x, p.y), vx: 0, vy: 0, vz: 0, amount: 2, grabbable: true, airborne: true });
   const sinking = world.spawn('wood', { x: p.x, y: p.y, z: world.heightAt(p.x, p.y), vx: 0, vy: 0, vz: 0, amount: 2, grabbable: true, sinking: true });
   let taken = 0;
   for (let i = 0; i < 20 * 30; i++) { game.tick(1 / 30); if (flying.carriedBy || sinking.carriedBy || !world.get(flying.id) || !world.get(sinking.id)) taken++; }
-  check(taken === 0, `in flight: wood flagged airborne or sinking at a woodcutter's feet is never picked up in 20 s (${taken} ticks taken)`);
+  check(taken === 0, `in flight: wood flagged airborne or sinking at a forester's feet is never picked up in 20 s (${taken} ticks taken)`);
   flying.airborne = false; // it landed
   let picked = false;
   for (let i = 0; i < 40 * 30 && !picked; i++) { game.tick(1 / 30); picked = !!flying.carriedBy || !world.get(flying.id); }
@@ -1263,7 +1273,7 @@ for (const kind of ['wood', 'grain']) for (const seed of [1, 2]) {
 // ---------------------------------------------------------------------------------------------
 // 19. Step 3 economy (docs/gameplay-spec.md): one store for grain, wood and ore with a cap on each;
 // a finite mine near each village that miners work while the ore stock is under oreTarget;
-// woodcutters replant; saplings grow; forests spread back toward their starting size; rain seeds
+// foresters replant; saplings grow; forests spread back toward their starting size; rain seeds
 // saplings and the rain miracle grows them; a store wreck salvages its ore; the same seed replays
 // the same forests and stocks.
 {
@@ -1283,7 +1293,7 @@ for (const kind of ['wood', 'grain']) for (const seed of [1, 2]) {
   const v = villagers(game, 'player').find((u) => u.hp > 0 && u.job !== 'miner');
   world.move(v, mine.x, mine.y, world.heightAt(mine.x, mine.y));
   game.events.emit('landed', { entityId: v.id, speed: 0.5 });
-  check(v.job === 'miner' && v.lockUntil > vs.sim.time, `a villager dropped at the mine mines (${v.job}, locked ${(v.lockUntil - vs.sim.time).toFixed(0)} s)`);
+  check(v.job === 'miner' && v.byHand, `a villager dropped at the mine mines (${v.job}, by hand ${v.byHand})`);
   // The mine is no finished building of the town: it does not widen where the player may build.
   // Spots within 3 tiles of it that neither temple nor any other finished building reaches stay out
   // of range.
@@ -1383,7 +1393,7 @@ for (const kind of ['wood', 'grain']) for (const seed of [1, 2]) {
     `a store never holds more than storeCap grain (most ${most}, cap ${VILLAGE.storeCap}), and a full store sends no one to farm (${s.jobs.farmer} farmers)`);
 }
 {
-  // Woodcutters replant: every tree felled outside town land has a sapling of its kind where it stood;
+  // Foresters replant: every tree felled outside town land has a sapling of its kind where it stood;
   // trees felled on town land (either village's influence) leave it clear for building, as before
   // step 3. Saplings grow 1/treeGrowTime a second.
   const game = newGame(1);
@@ -1395,7 +1405,7 @@ for (const kind of ['wood', 'grain']) for (const seed of [1, 2]) {
   const now = world.query({ kind: 'tree' });
   const sapling = (t) => now.some((n) => !before.has(n.id) && n.species === t.species && Math.abs(n.x - t.x) < 1e-9 && Math.abs(n.y - t.y) < 1e-9);
   const wild = gone.filter((t) => !t.town), town = gone.filter((t) => t.town);
-  check(wild.length >= 2 && wild.every(sapling), `woodcutters replant: ${wild.filter(sapling).length} of ${wild.length} trees felled outside town land have a sapling of their kind on their spot`);
+  check(wild.length >= 2 && wild.every(sapling), `foresters replant: ${wild.filter(sapling).length} of ${wild.length} trees felled outside town land have a sapling of their kind on their spot`);
   check(town.length >= 2 && !town.some(sapling), `trees felled on town land are not replanted (${town.filter(sapling).length} of ${town.length})`);
   const young = now.filter((t) => !before.has(t.id) && t.growth < 0.4);
   const g0 = new Map(young.map((t) => [t.id, t.growth]));
@@ -1404,7 +1414,7 @@ for (const kind of ['wood', 'grain']) for (const seed of [1, 2]) {
   check(young.length > 0 && grew.length === young.filter((t) => world.get(t.id)).length,
     `saplings grow ${(60 / VILLAGE.treeGrowTime).toFixed(2)} a minute (${grew.length} of ${young.length})`);
   // A sapling the hand moves keeps growing where it is set down; a moved grown tree felled by a
-  // woodcutter is not replanted where it lay.
+  // forester is not replanted where it lay.
   const s0 = young.find((t) => world.get(t.id));
   s0.held = true; game.tick(1 / 30); s0.held = false; s0.uprooted = true;
   const g1 = s0.growth;
@@ -1425,7 +1435,7 @@ function forestRun(seed) {
   const cap = vs.stats().treeCap;
   const cleared = clearWood(game, 60);
   const known = new Set(world.query({ kind: 'tree' }).map((t) => t.id));
-  // Spots of the trees standing now: a new tree on one of them is a woodcutter's replanting, not spread.
+  // Spots of the trees standing now: a new tree on one of them is a forester's replanting, not spread.
   const spot = (t) => `${t.x},${t.y}`;
   const stood = new Set(world.query({ kind: 'tree' }).map(spot));
   const fresh = [];
@@ -1518,6 +1528,106 @@ function forestRun(seed) {
   }
   check(pile && pile !== 'none' && pile.amount === Math.floor(1000 * VILLAGE.salvageShare),
     `clearing a store wreck leaves its ore salvage on the spot (${pile === 'none' ? 'none' : pile?.amount ?? 'wreck not cleared'}, want ${Math.floor(1000 * VILLAGE.salvageShare)})`);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Step 4: jobs by hand on top of automatic. A slow drop sets a job for good; a shake clears it; a
+// throw sets none; a job whose place is gone goes back to automatic; breeders bring births sooner.
+{
+  const game = newGame(1);
+  const vs = game.systems.village, { world } = game;
+  /** Lets villager v go at (x, y) as the hand reports it: `how` is 'drop', 'throw' or 'shake'. */
+  const letGo = (v, x, y, how = 'drop') => {
+    world.move(v, x, y, world.heightAt(x, y));
+    game.events.emit('release', { entityId: v.id, kind: 'villager', x, y, z: v.z, vx: 0, vy: 0, vz: 0, thrown: how === 'throw', shaken: how === 'shake' });
+    game.events.emit('landed', { entityId: v.id, speed: 0.5 });
+  };
+  const fields = buildings(game, 'player', 'field');
+  const autoFarmers = Math.min(fields.length, villagers(game, 'player').length);
+  // Four villagers dropped on the fields: more farmers than automatic assignment deals (one per field).
+  const four = villagers(game, 'player').filter((v) => v.job !== 'farmer').slice(0, 4);
+  four.forEach((v, i) => letGo(v, fields[i % fields.length].x, fields[i % fields.length].y));
+  check(four.every((v) => v.job === 'farmer' && v.byHand), `dropped on a field: a farmer by hand (${four.map((v) => `${v.job}/${v.byHand}`).join(', ')})`);
+  game.clock.run(3 * MIN, game.tick);
+  const farmers = vs.stats().player.jobs.farmer;
+  check(four.every((v) => v.job === 'farmer' && v.byHand) && farmers >= 4 && farmers > autoFarmers,
+    `a job set by hand outlasts the old 90 s lock and automatic assignment (after 3 min: ${farmers} farmers, automatic deals ${autoFarmers}; ${four.map((v) => v.job).join(', ')})`);
+  // The villagers show it: the village draws a hand-set villager with the glow, and only those.
+  game.systems.village.draw({});
+  const looks = (v, glow) => getSprite('villager', { job: v.job, pose: v.pose, frame: v.frame, facing: v.facing, owner: v.owner, glow });
+  const plain = villagers(game, 'player').find((v) => !v.byHand);
+  check(four[0].sprite === looks(four[0], true) && looks(four[0], true) !== looks(four[0], false) && plain.sprite === looks(plain, false),
+    'the village draws a hand-set villager with its glow and the others without');
+
+  // A shake clears the job and hands the villager back: landing by a field does not set it again.
+  const shaken = four[0];
+  letGo(shaken, fields[0].x, fields[0].y, 'shake');
+  check(!shaken.byHand, `a shake clears a hand-set job (by hand ${shaken.byHand})`);
+  game.clock.run(MIN, game.tick);
+  check(!shaken.byHand, `the shaken villager stays under automatic assignment (job ${shaken.job}, by hand ${shaken.byHand})`);
+  // A throw that lands by the mine sets no job.
+  const mine = buildings(game, 'player', 'mine')[0];
+  const thrown = villagers(game, 'player').find((v) => !v.byHand && v.job !== 'miner' && v.hp > 0);
+  const before = thrown.job;
+  letGo(thrown, mine.x, mine.y, 'throw');
+  check(thrown.job === before && !thrown.byHand, `a throw sets no job (${before} -> ${thrown.job}, by hand ${thrown.byHand})`);
+  // A job whose place is gone goes back to automatic assignment: a miner by hand at a worked-out mine.
+  letGo(thrown, mine.x, mine.y);
+  check(thrown.job === 'miner' && thrown.byHand, `a slow drop by the mine makes a miner by hand (${thrown.job}, ${thrown.byHand})`);
+  mine.ore = 0;
+  game.clock.run(3 * 30, game.tick);
+  check(!thrown.byHand, `a hand-set miner goes back to automatic once the mine is worked out (job ${thrown.job}, by hand ${thrown.byHand})`);
+}
+{
+  // Breeders: dropped on a house, or next to another adult away from any building; births come sooner.
+  const births = (breed) => {
+    const game = newGame(1);
+    const { world } = game;
+    const store = buildings(game, 'player', 'store')[0];
+    store.grain = 20000;
+    const houses = buildings(game, 'player', 'house');
+    const list = villagers(game, 'player').slice(0, breed);
+    list.forEach((v, i) => {
+      const h = houses[i % houses.length];
+      world.move(v, h.x, h.y, world.heightAt(h.x, h.y));
+      game.events.emit('release', { entityId: v.id, kind: 'villager', x: h.x, y: h.y, z: v.z, vx: 0, vy: 0, vz: 0, thrown: false, shaken: false });
+    });
+    const ok = list.every((v) => v.job === 'breeder' && v.byHand);
+    const n0 = villagers(game, 'player').length;
+    game.clock.run(MIN, game.tick);
+    return { ok, born: villagers(game, 'player').length - n0, game };
+  };
+  const cap = KINDS.house.cap;
+  KINDS.house.cap = 20; // room in the houses, so births are paced by the timer alone
+  let base, bred;
+  try { base = births(0); bred = births(4); } finally { KINDS.house.cap = cap; }
+  check(bred.ok, 'villagers dropped on houses become breeders by hand');
+  check(bred.born >= 2 * base.born + 2, `breeders bring births sooner (1 minute: ${bred.born} born with 4 breeders, ${base.born} with none)`);
+  // Next to another adult, clear of every building and tree: a breeder too.
+  const game = bred.game, { world } = game;
+  const vs = game.systems.village;
+  const all = villagers(game, 'player');
+  const R = VILLAGE.dropRadius + 1;
+  const clear = (x, y) => world.query({ kind: 'building' }).every((b) => Math.hypot(b.x - x, b.y - y) > R + 3) &&
+    !world.query({ kind: 'tree', x, y, r: R + 1 }).length && vs.sim.paths.walkable(Math.floor(x), Math.floor(y));
+  const st = buildings(game, 'player', 'temple')[0];
+  let spot = null;
+  for (let r = 4; r < 30 && !spot; r++) for (let a = 0; a < 16 && !spot; a++) {
+    const x = st.x + Math.cos(a * Math.PI / 8) * r, y = st.y + Math.sin(a * Math.PI / 8) * r;
+    if (clear(x, y) && clear(x + 0.6, y)) spot = { x, y };
+  }
+  const host = all.find((v) => !v.byHand), guest = all.find((v) => v !== host && !v.byHand);
+  if (check(spot && host && guest, 'found open ground clear of buildings and trees, and two villagers')) {
+    world.move(host, spot.x, spot.y, world.heightAt(spot.x, spot.y));
+    world.move(guest, spot.x + 0.6, spot.y, world.heightAt(spot.x + 0.6, spot.y));
+    game.events.emit('release', { entityId: guest.id, kind: 'villager', x: guest.x, y: guest.y, z: guest.z, vx: 0, vy: 0, vz: 0, thrown: false, shaken: false });
+    check(guest.job === 'breeder' && guest.byHand, `dropped next to another adult: a breeder (${guest.job})`);
+  }
+  // With no house left standing, breeders go back to automatic assignment.
+  for (const h of buildings(game, 'player', 'house')) h.hp = 0;
+  game.clock.run(3 * 30, game.tick);
+  const left = villagers(game, 'player').filter((v) => v.job === 'breeder');
+  check(left.length === 0, `breeders go back to automatic once no house stands (${left.length} breeders left)`);
 }
 
 console.log(`check-village: ${passes} passed, ${fails.length} failed`);

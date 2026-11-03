@@ -11,7 +11,7 @@ export const TOWN = { player: 600, rival: 120 };
 const PER = { field: 15, store: 100 };
 /** Stock per store in a town, each under VILLAGE.storeCap so the stores still take loads as they did
  * before the cap: enough that the wood stays above
- * VILLAGE.woodTarget all scene (so the woodcutters, one by then, leave the forest the fires need),
+ * VILLAGE.woodTarget all scene (so the foresters, one by then, leave the forest the fires need),
  * nobody goes hungry and the ore is over VILLAGE.oreTarget (no miners: the scene measures the town
  * as it was, and a mine's few miners are a rounding error next to 600 villagers). */
 const STOCK = { wood: 15000, grain: 10000, ore: 2000 };
