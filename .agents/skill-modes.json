@@ -55,6 +55,7 @@
     "writing-plans": "native",
     "gauntlet": "disabled",
     "wow-animation": "native",
-    "climb-loop": "native"
+    "climb-loop": "native",
+    "untangle": "native"
   }
 }
